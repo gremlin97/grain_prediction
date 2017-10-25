@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 
 if __name__ == '__main__':
-    temp_df = pd.read_csv('data/江苏.csv')
+    temp_df = pd.read_csv('../DL_data/temperature/江苏.csv')
     y_s = temp_df['year']
     m_s = temp_df['month']
     d_s = temp_df['day']
@@ -16,4 +16,4 @@ if __name__ == '__main__':
     temp_df.set_index('date', inplace=True)
     temp_df = temp_df[temp_df['average'] < 50]
     temp_df = temp_df[['city', 'average', 'max', 'min', 'rain']]
-    temp_df.to_csv('data/JiangSu.csv')
+    temp_df.to_csv('../DL_data/temperature/JiangSu.csv')
