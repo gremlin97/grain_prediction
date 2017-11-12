@@ -5,6 +5,7 @@ import pandas as pd
 import numpy as np
 import os
 import matplotlib.pyplot as plt
+import sklearn.preprocessing as pp
 
 
 class BatchManager(object):
@@ -20,17 +21,19 @@ class BatchManager(object):
             self.layer_temp = pd.read_csv('../DL_data/layers_temperature/rice_layer_4.csv')
         elif grain_type == 'wheat':
             self.layer_temp = pd.read_csv('../DL_data/layers_temperature/wheat_layer_4.csv')
-
+        self.layer_temp = self.layer_temp[self.layer_temp['平均温度'] < 45]
         # 粮仓温度点时间数据
         self.train_barns_dt = {}
         self.test_barn_dt = []
         for barn in barns:
+            barn_layer_time = set(self.layer_temp[self.layer_temp['仓库信息'] == str(barn)+'仓']['粮情时间'])
             self.train_barns_dt[barn] = []
             barn_path = '../DL_data/points_temperature/' + str(barn) + '仓/'
             barn_dir = os.listdir(barn_path)
             for file_name in barn_dir:
                 dt = file_name.split('.')[0]
-                self.train_barns_dt[barn].append(dt)
+                if dt in barn_layer_time:
+                    self.train_barns_dt[barn].append(dt)
             self.train_barns_dt[barn] = pd.Series(self.train_barns_dt[barn])
             self.train_barns_dt[barn] = self.train_barns_dt[barn][self.train_barns_dt[barn] >= dt_from]
             self.train_barns_dt[barn] = self.train_barns_dt[barn][self.train_barns_dt[barn] <= dt_to]
@@ -50,6 +53,10 @@ class BatchManager(object):
         self.train_dt_index = 0
         self.test_dt_index = 0
         self.STEP_SIZE = 5
+        # cur_barn, images, features, lables = self.whole_train()
+        # self.X_scaler = pp.RobustScaler().fit(np.array(images).reshape((-1, 6 * 6 * 4)))
+        # self.F_scaler = pp.RobustScaler().fit(features)
+        self.data_cache = {}
 
     def truncation(self, *batches):
         result = []
@@ -64,41 +71,66 @@ class BatchManager(object):
                 result.append(batch)
         return result
 
+    def whole_train(self):
+        points_batch = []  # 粮食温度点
+        other_features_batch = []  # 其他特征
+        output_batch = []  # 输出
+        barns = self.train_barns
+        for _ in barns:
+            _, pb, fb, ob, days = self.next_train_batch(1000)
+            points_batch = points_batch + pb
+            other_features_batch = other_features_batch + fb
+            output_batch = output_batch + ob
+        return 'whole', points_batch, other_features_batch, output_batch
+
     def next_train_batch(self, batch_size):
         barn_now = self.train_barns[self.train_barn_index]
+        if barn_now in self.data_cache:
+            self.train_barn_index = (self.train_barn_index + 1) % len(self.train_barns)
+            return self.data_cache[barn_now]
         points_batch = []  # 粮食温度点
         other_features_batch = []  # 其他特征
         output_batch = []  # 输出
         size = 0
+        days = []
         step_count = 1
         while size < batch_size:
             flag = False
-            pt, of, pre = None, None, None
+            pt, of, pre, day_in_year = None, None, None, None
             while not flag:
-                flag, pt, of, pre, _ = self.next(barn_now, self.train_dt_index)
+                flag, pt, of, pre, day_in_year = self.next(barn_now, self.train_dt_index)
                 self.train_dt_index += 1
                 if self.train_dt_index == len(self.train_barns_dt[barn_now]):
                     self.train_barn_index = (self.train_barn_index + 1) % len(self.train_barns)
-                    self.train_dt_index = random.randint(0, 4)
-                    points_batch, other_features_batch = self.truncation(points_batch,
-                                                                         other_features_batch
-                                                                         )
+                    # self.train_dt_index = random.randint(0, 4)
+                    self.train_dt_index = 0
+
+                    # points_batch, other_features_batch = self.truncation(points_batch,
+                    #                                                      other_features_batch
+                    #                                                      )
                     if len(points_batch) == 0:
                         return self.next_train_batch(batch_size)
-                    return barn_now, points_batch, other_features_batch, output_batch
+                    self.data_cache[barn_now] = (barn_now, points_batch, other_features_batch, output_batch, days)
+                    # return barn_now, points_batch, other_features_batch, output_batch, days
+                    return self.data_cache[barn_now]
             points_batch.append(pt)
             other_features_batch.append(of)
-            if step_count % self.STEP_SIZE == 0:
-                output_batch.append(pre)
+            # if step_count % self.STEP_SIZE == 0:
+            output_batch.append(pre)
+            days.append(day_in_year)
             step_count += 1
             size += 1
-        points_batch, other_features_batch = self.truncation(points_batch,
-                                                             other_features_batch)
+        # points_batch, other_features_batch = self.truncation(points_batch,
+        #                                                      other_features_batch)
         if len(points_batch) == 0:
             return self.next_train_batch(batch_size)
-        return barn_now, points_batch, other_features_batch, output_batch
+        self.data_cache[barn_now] = (barn_now, points_batch, other_features_batch, output_batch, days)
+        # return barn_now, points_batch, other_features_batch, output_batch, days
+        return self.data_cache[barn_now]
 
     def next_test_batch(self, batch_size):
+        if self.test_barn in self.data_cache:
+            return self.data_cache[self.test_barn]
         points_batch = []  # 粮食温度点
         other_features_batch = []  # 其他特征
         output_batch = []  # 输出
@@ -112,25 +144,29 @@ class BatchManager(object):
                 flag, pt, of, pre, day_in_year = self.next(self.test_barn, self.test_dt_index)
                 self.test_dt_index += 1
                 if self.test_dt_index == len(self.test_barn_dt):
-                    self.test_dt_index = random.randint(0, 4)
-                    points_batch, other_features_batch = self.truncation(points_batch,
-                                                                               other_features_batch)
+                    self.test_dt_index = 0
+                    # points_batch, other_features_batch = self.truncation(points_batch,
+                    #                                                            other_features_batch)
                     if len(points_batch) == 0:
                         return self.next_test_batch(batch_size)
-                    return points_batch, other_features_batch, output_batch, days
+                    self.data_cache[self.test_barn] = points_batch, other_features_batch, output_batch, days
+                    # return points_batch, other_features_batch, output_batch, days
+                    return self.data_cache[self.test_barn]
             points_batch.append(pt)
             other_features_batch.append(of)
-            if step_count % self.STEP_SIZE == 0:
-                output_batch.append(pre)
-                days.append(day_in_year)
+            # if step_count % self.STEP_SIZE == 0:
+            output_batch.append(pre)
+            days.append(day_in_year)
             step_count += 1
             size += 1
-        print(output_batch)
-        points_batch, other_features_batch = self.truncation(points_batch,
-                                                                   other_features_batch)
+        # print(output_batch)
+        # points_batch, other_features_batch = self.truncation(points_batch,
+        #                                                            other_features_batch)
         if len(points_batch) == 0:
             return self.next_test_batch(batch_size)
-        return points_batch, other_features_batch, output_batch, days
+        self.data_cache[self.test_barn] = points_batch, other_features_batch, output_batch, days
+        # return points_batch, other_features_batch, output_batch, days
+        return self.data_cache[self.test_barn]
 
     def next(self, barn, dt_index):
         if barn in self.train_barns:
@@ -146,7 +182,6 @@ class BatchManager(object):
         dt_path = path + dt + '.npy'
         # 如果当前温度和预测温度存在，且之间的天气温度存在足够
         other_features = []
-
         if os.path.exists(dt_path) \
                 and pre_dt in set(layer_temp['粮情时间']) \
                 and air_df.shape[0] >= 8 \
@@ -156,15 +191,18 @@ class BatchManager(object):
             if air_df.shape[0] != 10:
                 air_df = self.fill_data(air_df, pre_dt)
             points_temp = np.load(dt_path)
-            pre_temp = layer_temp[layer_temp['粮情时间'] == pre_dt]['平均温度'].iloc[0]
+            # pre_temp = layer_temp[layer_temp['粮情时间'] == pre_dt]['平均温度'].iloc[0]
+            # print('points shape:', points_temp.shape)
+            pre_path = path + pre_dt + '.npy'
+            pre_temp = np.load(pre_path)[0, 1, 1]
             # 十一天气温加时间（1-365）
             other_features.append(air_now)
 
             other_features.extend(air_df['average'])
             day_in_year = int(pd.to_datetime(dt).strftime('%j'))
-            other_features.append(day_in_year)
-
-            return True, np.array(points_temp).transpose([2, 1, 0]), np.array(other_features), pre_temp, day_in_year
+            # day_in_year
+            other_features.append(day_in_year / 365 - 0.5)
+            return True, np.array(points_temp).transpose([2, 1, 0]), np.array(other_features), pre_temp, dt
         else:
             return False, None, None, None, None
 
@@ -193,12 +231,18 @@ class GrainNetwork(object):
                 'conv2': tf.get_variable('W_conv2', [2, 2, 20, 40],
                                          initializer=tf.contrib.layers.xavier_initializer_conv2d()),
                 # 3*3*40+11+2->1024
-                'fc1': tf.get_variable('W_fc1', [3 * 3 * 40 + 11 + 1, 1024]),
+                'fc1': tf.get_variable('W_fc1', [3 * 3 * 40 + 11 + 1, 800],
+                                       initializer=tf.contrib.layers.xavier_initializer()),
                 # 1024->512
                 # 512->64
-                'fc2': tf.get_variable('W_fc2', [512, 64]),
+                'fc2': tf.get_variable('W_fc2', [800, 500],
+                                       initializer=tf.contrib.layers.xavier_initializer()),
+                # 256->64
+                'fc3': tf.get_variable('W_fc3', [500, 300],
+                                       initializer=tf.contrib.layers.xavier_initializer()),
                 # 64->1
-                'output': tf.get_variable('W_output', [64, 1]),
+                'output': tf.get_variable('W_output', [300, 1],
+                                          initializer=tf.contrib.layers.xavier_initializer()),
             }
 
             # 偏置
@@ -207,9 +251,11 @@ class GrainNetwork(object):
                                          initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
                 'conv2': tf.get_variable('b_conv2', [40, ],
                                          initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
-                'fc1': tf.get_variable('b_fc1', [1024, ],
+                'fc1': tf.get_variable('b_fc1', [800, ],
                                        initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
-                'fc2': tf.get_variable('b_fc2', [64, ],
+                'fc2': tf.get_variable('b_fc2', [500, ],
+                                       initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
+                'fc3': tf.get_variable('b_fc3', [300, ],
                                        initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
                 'output': tf.get_variable('b_output', [1, ],
                                           initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
@@ -255,7 +301,7 @@ class GrainNetwork(object):
         # 第二平均池化层
         with tf.name_scope('pool2'):
             pool2 = tf.nn.avg_pool(conv2, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding='VALID')
-
+            # pool2 = tf.nn.dropout(pool2, self.keep_prob1)
         # 第一全连接层
         with tf.name_scope('fc1'):
             with tf.name_scope('fc1'):
@@ -265,43 +311,60 @@ class GrainNetwork(object):
             with tf.name_scope('drop1'):
                 # 第一dropout层
                 drop1 = tf.nn.dropout(fc1, self.keep_prob1)
+                drop1 = tf.nn.relu(drop1)
 
         # RNN层
-        with tf.name_scope('rnn'):
-            rnn_inputs = tf.reshape(drop1, shape=[-1, self.STEP_SIZE, 1024])
-            rnn_cell = tf.nn.rnn_cell.LSTMCell(num_units=512)
-            # rnn_cell = tf.nn.rnn_cell.DropoutWrapper(rnn_cell, output_keep_prob=self.keep_prob2)
-            # batch_size = tf.shape(self.batch_tensor)[0] / self.STEP_SIZE
-            self.init_s = rnn_cell.zero_state(batch_size=self.batch_tensor, dtype=tf.float32)
-            rnn_outputs, self.final_s = tf.nn.dynamic_rnn(
-                rnn_cell,  # cell you have chosen
-                rnn_inputs,  # input
-                initial_state=self.init_s,  # the initial hidden state
-                time_major=False,  # False: (batch, time step, input); True: (time step, batch, input)
-            )
-            rnn_outputs = rnn_outputs[:, -1, :]
-            rnn_outputs = tf.reshape(rnn_outputs, shape=[-1, 512])
+        # with tf.name_scope('rnn'):
+        #     rnn_inputs = tf.reshape(drop1, shape=[-1, self.STEP_SIZE, 1024])
+        #     rnn_cell = tf.nn.rnn_cell.LSTMCell(num_units=512)
+        #     # rnn_cell = tf.nn.rnn_cell.DropoutWrapper(rnn_cell, output_keep_prob=self.keep_prob2)
+        #     # batch_size = tf.shape(self.batch_tensor)[0] / self.STEP_SIZE
+        #     self.init_s = rnn_cell.zero_state(batch_size=self.batch_tensor, dtype=tf.float32)
+        #     rnn_outputs, self.final_s = tf.nn.dynamic_rnn(
+        #         rnn_cell,  # cell you have chosen
+        #         rnn_inputs,  # input
+        #         initial_state=self.init_s,  # the initial hidden state
+        #         time_major=False,  # False: (batch, time step, input); True: (time step, batch, input)
+        #     )
+        #     rnn_outputs = rnn_outputs[:, -1, :]
+        #     rnn_outputs = tf.reshape(rnn_outputs, shape=[-1, 512])
         # 第二全连接层
         with tf.name_scope('fc2'):
             with tf.name_scope('fc2'):
-                fc2 = tf.matmul(rnn_outputs, self.weights['fc2']) + self.biases['fc2']
+                fc2 = tf.matmul(drop1, self.weights['fc2']) + self.biases['fc2']
             with tf.name_scope('drop2'):
                 # 第一dropout层
                 drop2 = tf.nn.dropout(fc2, self.keep_prob2)
+                drop2 = tf.nn.relu(drop2)
+
+        # 第三全连接层
+        with tf.name_scope('fc3'):
+            with tf.name_scope('fc3'):
+                fc3 = tf.matmul(drop2, self.weights['fc3']) + self.biases['fc3']
+            with tf.name_scope('drop2'):
+                #     # 第一dropout层
+                drop3 = tf.nn.dropout(fc3, self.keep_prob2)
+                drop3 = tf.nn.relu(drop3)
 
         # 输出层
         with tf.name_scope('output'):
-            output = tf.matmul(drop2, self.weights['output']) + self.biases['output']
-
+            output = tf.matmul(drop3, self.weights['output']) + self.biases['output']
         return output
 
     def loss(self, pred):
+        # alpha = 0.8
+        # beta = 1.8
+        alpha = 0.82
+        beta = 1.66
         with tf.name_scope('loss'):
-            mse = tf.losses.mean_squared_error(labels=self.targets, predictions=pred)
+            # mse = tf.losses.mean_squared_error(labels=self.targets, predictions=pred)
+            mse = tf.reduce_sum(tf.where(tf.less(self.targets, pred), alpha * tf.square(pred-self.targets), beta * tf.square(pred-self.targets)))
         return mse
 
+
+
     def optimizer(self, loss, lr=0.01):
-        train_optimizer = tf.train.AdamOptimizer(lr).minimize(loss)
+        train_optimizer = tf.train.AdadeltaOptimizer(lr).minimize(loss)
         return train_optimizer
 
     def paint(self):
@@ -319,39 +382,54 @@ class GrainNetwork(object):
         optimizer = self.optimizer(loss, lr=0.01)
         sess = tf.Session()
         sess.run(tf.global_variables_initializer())
-        plt.figure(1, figsize=(12, 5))
+        plt.figure(1, figsize=(15, 5))
         plt.ion()
-        batch_manager = BatchManager(train_barns, test_barn, grain_type, '2016-01-01', '2016-12-30')
+        batch_manager = BatchManager(train_barns, test_barn, grain_type, '2015-09-01', '2017-9-20')
         pre_barn = None
         final_s_ = None
         for iter in range(max_iter):
-            cur_barn, images, features, lables = batch_manager.next_train_batch(20)
+            cur_barn, images, features, lables, days = batch_manager.next_train_batch(500)
+            # images = batch_manager.X_scaler.transform(np.array(images).reshape((-1, 6 * 6 * 4)))
+            # images = images.reshape((-1, 6, 6, 4))
+            # features = batch_manager.F_scaler.transform(features)
+            # cur_barn, images, features, lables = batch_manager.whole_train()
             lables = np.array(lables)[:, np.newaxis]
             images = np.array(images)
             features = np.array(features)
-            print(images.shape)
+            # print(images.shape)
             if cur_barn is pre_barn:
                 feed_dict = {self.images: images, self.targets: lables,
                              self.temperatures: features,
-                             self.init_s: final_s_, self.keep_prob1: 0.5, self.keep_prob2: 0.5,
+                             self.keep_prob1: 0.5, self.keep_prob2: 0.5,
                              self.batch_tensor: images.shape[0] / self.STEP_SIZE}
             else:
                 feed_dict = {self.images: images, self.targets: lables,
                              self.temperatures: features,
-                             self.keep_prob1: 0.8, self.keep_prob2: 0.8,
+                             self.keep_prob1: 0.5, self.keep_prob2: 0.5,
                              self.batch_tensor: images.shape[0] / self.STEP_SIZE}
             pre_barn = cur_barn
             # print(lables, features)
-            _, final_s_, loss_ = sess.run([optimizer, self.final_s, loss], feed_dict)
-            print('iter', iter, 'loss', loss_)
-            if iter % 20 == 0:
-                # batch_manager.test_dt_index = random.randint(0, 4)
-
-                test_imgs, test_f, test_y, days = batch_manager.next_test_batch(190)
+            _, pred_, loss_ = sess.run([optimizer, pred, loss], feed_dict)
+            # plt.scatter(days, lables.reshape(-1, ), s=20, edgecolor="black",
+            #             c="darkorange", label="data")
+            # # plt.plot(days, test_y.reshape(-1, ), 'r-')
+            # plt.plot(days, pred_.reshape(-1, ), 'b-', label='prediction')
+            # plt.legend()
+            # # plt.ylim((-1.2, 1.2))
+            # plt.draw()
+            # plt.pause(0.05)
+            # plt.clf()
+            print(cur_barn, 'iter', iter, 'loss', loss_)
+            if iter % 2 == 0:
+                batch_manager.test_dt_index = 0
+                test_imgs, test_f, test_y, days = batch_manager.next_test_batch(500)
+                # test_imgs = batch_manager.X_scaler.transform(np.array(test_imgs).reshape((-1, 6 * 6 * 4)))
+                # test_imgs = test_imgs.reshape((-1, 6, 6, 4))
+                # test_f = batch_manager.F_scaler.transform(test_f)
                 test_y = np.array(test_y)[:, np.newaxis]
                 test_imgs = np.array(test_imgs)
                 test_f = np.array(test_f)
-                print(test_y)
+                # print(test_y)
 
                 feed_dict = {self.images: test_imgs, self.targets: test_y,
                              self.temperatures: test_f,
@@ -359,21 +437,27 @@ class GrainNetwork(object):
                              self.batch_tensor: test_imgs.shape[0] / self.STEP_SIZE}
                 pred_, loss_ = sess.run([pred, loss], feed_dict)
                 print('loss', loss_)
-                plt.plot(days, test_y.reshape(-1, ), 'r-')
-                plt.plot(days, pred_.reshape(-1, ), 'b-')
+                plt.scatter(pd.to_datetime(days), test_y.reshape(-1, ), s=20, edgecolor="black",
+                            c="darkorange", label="data")
+                # plt.plot(days, test_y.reshape(-1, ), 'r-')
+                plt.plot(pd.to_datetime(days), pred_.reshape(-1, ), 'b-', label='prediction')
+                plt.legend()
                 # plt.ylim((-1.2, 1.2))
                 plt.draw()
-                plt.pause(0.05)
+                plt.pause(0.01)
+                plt.savefig('../figures/rice_barn9_point.png')
                 plt.clf()
-        plt.ioff()
-        plt.show()
+
+        # plt.ioff()
+        # plt.show()
 
 
 if __name__ == '__main__':
     # wheat [1,8,10,12,15,16,20,26,27,28,31,33]
     # rice [2,3,5,6,7,9,11,13,14,17,18,19,21,22,23,24,29,30,32,34,35]
 
-    barns = [1, 8, 10, 12, 15, 16, 20, 26, 27, 28, 31, 33]
-    barn = 1
+    barns = [2, 3, 5, 6, 7, 9, 11, 13, 14, 17, 18, 19, 21, 22, 23, 24, 29, 30, 32, 34, 35]
+    barn = 9
     net = GrainNetwork()
-    net.train(100000, barns, barn, 'wheat')
+    net.train(1200, barns, barn, 'rice')
+    # net.paint()

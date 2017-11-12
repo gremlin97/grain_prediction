@@ -4,8 +4,6 @@ import pandas as pd
 import numpy as np
 import os
 
-import time
-
 
 class ExtractPoints:
     def __init__(self):
@@ -55,7 +53,7 @@ class ExtractPoints:
                     print(n_sid, 'left')
                     n_sid -= 1
                 threads = []
-            t = threading.Thread(target=self.func, args=(sid, ))
+            t = threading.Thread(target=self.func, args=(sid,))
             t.setDaemon(True)
             t.start()
             threads.append(t)
@@ -75,7 +73,7 @@ class ExtractPoints:
         path = '../DL_data/points_temperature/' + str(barn) + '/'
         filename = path + str(date) + '.npy'
         if os.path.exists(filename):
-            print(filename,'already exists')
+            print(filename, 'already exists')
             return
 
         # 存储点位
@@ -92,7 +90,7 @@ class ExtractPoints:
         for i in range(nz):
             zdic[zlist[i]] = i
         # print(points_df[['X点','Y点','Z点','点位温度','关联粮情ID']])
-        arr = np.ones((nz, ny, nx), dtype=np.float32) * 66
+        arr = np.ones((nz, ny, nx), dtype=np.float32) * 66  # 66表示无温度点
         for _, row in points_df.iterrows():
             arr[zdic[row['Z点']], ydic[row['Y点']], xdic[row['X点']]] = np.round(row['数值'], 2)
         # 补足缺失测温点
