@@ -9,7 +9,7 @@ import sklearn.preprocessing as pp
 
 
 class BatchManager(object):
-    def __init__(self, train_barns, test_barn, grain_type, dt_from, dt_to):
+    def __init__(self, train_barns, test_barn, grain_type, dt_from, dt_to, pre_days):
         train_barns = train_barns[:]
         train_barns.remove(test_barn)
         self.train_barns = train_barns
@@ -26,7 +26,7 @@ class BatchManager(object):
         self.train_barns_dt = {}
         self.test_barn_dt = []
         for barn in barns:
-            barn_layer_time = set(self.layer_temp[self.layer_temp['仓库信息'] == str(barn)+'仓']['粮情时间'])
+            barn_layer_time = set(self.layer_temp[self.layer_temp['仓库信息'] == str(barn) + '仓']['粮情时间'])
             self.train_barns_dt[barn] = []
             barn_path = '../DL_data/points_temperature/' + str(barn) + '仓/'
             barn_dir = os.listdir(barn_path)
@@ -57,6 +57,7 @@ class BatchManager(object):
         # self.X_scaler = pp.RobustScaler().fit(np.array(images).reshape((-1, 6 * 6 * 4)))
         # self.F_scaler = pp.RobustScaler().fit(features)
         self.data_cache = {}
+        self.pre_days = pre_days
 
     def truncation(self, *batches):
         result = []
@@ -93,12 +94,13 @@ class BatchManager(object):
         output_batch = []  # 输出
         size = 0
         days = []
+        months = []
         step_count = 1
         while size < batch_size:
             flag = False
-            pt, of, pre, day_in_year = None, None, None, None
+            pt, of, pre, pre_day, month = None, None, None, None, None
             while not flag:
-                flag, pt, of, pre, day_in_year = self.next(barn_now, self.train_dt_index)
+                flag, pt, of, pre, pre_day, month = self.next(barn_now, self.train_dt_index)
                 self.train_dt_index += 1
                 if self.train_dt_index == len(self.train_barns_dt[barn_now]):
                     self.train_barn_index = (self.train_barn_index + 1) % len(self.train_barns)
@@ -110,21 +112,23 @@ class BatchManager(object):
                     #                                                      )
                     if len(points_batch) == 0:
                         return self.next_train_batch(batch_size)
-                    self.data_cache[barn_now] = (barn_now, points_batch, other_features_batch, output_batch, days)
+                    self.data_cache[barn_now] = (
+                        barn_now, points_batch, other_features_batch, output_batch, days, months)
                     # return barn_now, points_batch, other_features_batch, output_batch, days
                     return self.data_cache[barn_now]
             points_batch.append(pt)
             other_features_batch.append(of)
             # if step_count % self.STEP_SIZE == 0:
             output_batch.append(pre)
-            days.append(day_in_year)
+            days.append(pre_day)
+            months.append(month)
             step_count += 1
             size += 1
         # points_batch, other_features_batch = self.truncation(points_batch,
         #                                                      other_features_batch)
         if len(points_batch) == 0:
             return self.next_train_batch(batch_size)
-        self.data_cache[barn_now] = (barn_now, points_batch, other_features_batch, output_batch, days)
+        self.data_cache[barn_now] = (barn_now, points_batch, other_features_batch, output_batch, days, months)
         # return barn_now, points_batch, other_features_batch, output_batch, days
         return self.data_cache[barn_now]
 
@@ -136,12 +140,13 @@ class BatchManager(object):
         output_batch = []  # 输出
         size = 0
         days = []
+        months = []
         step_count = 1
         while size < batch_size:
             flag = False
-            pt, of, pre, day_in_year = None, None, None, None
+            pt, of, pre, pre_day, month = None, None, None, None, None
             while not flag:
-                flag, pt, of, pre, day_in_year = self.next(self.test_barn, self.test_dt_index)
+                flag, pt, of, pre, pre_day, month = self.next(self.test_barn, self.test_dt_index)
                 self.test_dt_index += 1
                 if self.test_dt_index == len(self.test_barn_dt):
                     self.test_dt_index = 0
@@ -149,14 +154,15 @@ class BatchManager(object):
                     #                                                            other_features_batch)
                     if len(points_batch) == 0:
                         return self.next_test_batch(batch_size)
-                    self.data_cache[self.test_barn] = points_batch, other_features_batch, output_batch, days
+                    self.data_cache[self.test_barn] = points_batch, other_features_batch, output_batch, days, months
                     # return points_batch, other_features_batch, output_batch, days
                     return self.data_cache[self.test_barn]
             points_batch.append(pt)
             other_features_batch.append(of)
             # if step_count % self.STEP_SIZE == 0:
             output_batch.append(pre)
-            days.append(day_in_year)
+            days.append(pre_day)
+            months.append(month)
             step_count += 1
             size += 1
         # print(output_batch)
@@ -164,7 +170,7 @@ class BatchManager(object):
         #                                                            other_features_batch)
         if len(points_batch) == 0:
             return self.next_test_batch(batch_size)
-        self.data_cache[self.test_barn] = points_batch, other_features_batch, output_batch, days
+        self.data_cache[self.test_barn] = points_batch, other_features_batch, output_batch, days, months
         # return points_batch, other_features_batch, output_batch, days
         return self.data_cache[self.test_barn]
 
@@ -175,7 +181,7 @@ class BatchManager(object):
             dts = self.test_barn_dt
         layer_temp = self.layer_temp[self.layer_temp['仓库信息'] == str(barn) + '仓']
         dt = dts.iloc[dt_index]  # 当前时间
-        delta = pd.to_timedelta('10 days')
+        delta = pd.to_timedelta(self.pre_days)
         pre_dt = (pd.to_datetime(dt) + delta).strftime('%Y-%m-%d')  # 十天后
         air_df = self.air_temp[[dt < date <= pre_dt for date in self.air_temp['date']]]
         path = '../DL_data/points_temperature/' + str(barn) + '仓/'
@@ -199,12 +205,14 @@ class BatchManager(object):
             other_features.append(air_now)
 
             other_features.extend(air_df['average'])
-            day_in_year = int(pd.to_datetime(dt).strftime('%j'))
+            day_in_year = int(pd.to_datetime(pre_dt).strftime('%j'))
+            # month 0-11
+            month = int(pd.to_datetime(pre_dt).strftime('%m')) - 1
             # day_in_year
             other_features.append(day_in_year / 365 - 0.5)
-            return True, np.array(points_temp).transpose([2, 1, 0]), np.array(other_features), pre_temp, dt
+            return True, np.array(points_temp).transpose([2, 1, 0]), np.array(other_features), pre_temp, pre_dt, month
         else:
-            return False, None, None, None, None
+            return False, None, None, None, None, None
 
     def fill_data(self, df, pre_dt):
         mean = df['average'].mean()
@@ -219,7 +227,7 @@ class BatchManager(object):
 
 
 class GrainNetwork(object):
-    def __init__(self):
+    def __init__(self, output):
         # 初始化权值和偏置
         with tf.variable_scope("weights"):
             # 权重
@@ -253,12 +261,21 @@ class GrainNetwork(object):
                                          initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
                 'fc1': tf.get_variable('b_fc1', [800, ],
                                        initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
+                'fc1_t': tf.get_variable('bt_fc1', [12, 800],
+                                         initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
                 'fc2': tf.get_variable('b_fc2', [500, ],
                                        initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
+                'fc2_t': tf.get_variable('bt_fc2', [12, 500],
+                                         initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
+
                 'fc3': tf.get_variable('b_fc3', [300, ],
                                        initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
+                'fc3_t': tf.get_variable('bt_fc3', [12, 300],
+                                         initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
                 'output': tf.get_variable('b_output', [1, ],
                                           initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
+                'output_t': tf.get_variable('bt_output', [12, 1],
+                                            initializer=tf.constant_initializer(value=0.0, dtype=tf.float32))
             }
             self.keep_prob1 = tf.placeholder(tf.float32, name='keep_prob1')
             self.keep_prob2 = tf.placeholder(tf.float32, name='keep_prob2')
@@ -268,10 +285,42 @@ class GrainNetwork(object):
             self.temperatures = tf.placeholder(tf.float32, [None, 11 + 1], name='temperatures')
         with tf.name_scope('targets'):
             self.targets = tf.placeholder(tf.float32, [None, 1], name='targets')
+            self.months = tf.placeholder(tf.int32, [None, 1], name='months')
         self.init_s = None
         self.final_s = None
         self.batch_tensor = tf.placeholder(tf.int32, [])  # 用于保留batch_size
         self.STEP_SIZE = 5
+        self.month_map = [0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2]
+        self.wheat_weights = [0.0402227666955,
+                              0.031469607781,
+                              0.0441908958449,
+                              0.0619128091163,
+                              0.0779277661702,
+                              0.0949637405299,
+                              0.117478400516,
+                              0.133751192474,
+                              0.130655772891,
+                              0.111494953891,
+                              0.0928757160844,
+                              0.0630563780055, ]
+        self.rice_weights = [0.032534470896,
+                             0.0245423446013,
+                             0.035091664762,
+                             0.0551522064438,
+                             0.0759471321252,
+                             0.0966625524964,
+                             0.1271142898,
+                             0.145481189775,
+                             0.144061524447,
+                             0.120033676453,
+                             0.0919763712315,
+                             0.0514025769694,
+                             ]
+        for m in range(12):
+            if self.month_map[m] == 1:
+                self.wheat_weights[m] *= 2
+                self.rice_weights[m] *= 2
+        self.output_file = open(output, 'w+')
 
     def add_layers(self):
         # 第一卷积层
@@ -308,6 +357,8 @@ class GrainNetwork(object):
                 flatten = tf.reshape(pool2, [-1, 3 * 3 * 40], name='flatten')
                 connectted = tf.concat([self.temperatures, flatten], axis=1, name='concat')
                 fc1 = tf.matmul(connectted, self.weights['fc1']) + self.biases['fc1']
+                month_to_bias = tf.gather(self.month_map, tf.reshape(self.months, [-1, ]))
+                fc1 = fc1 + tf.gather(self.biases['fc1_t'], month_to_bias)
             with tf.name_scope('drop1'):
                 # 第一dropout层
                 drop1 = tf.nn.dropout(fc1, self.keep_prob1)
@@ -332,6 +383,9 @@ class GrainNetwork(object):
         with tf.name_scope('fc2'):
             with tf.name_scope('fc2'):
                 fc2 = tf.matmul(drop1, self.weights['fc2']) + self.biases['fc2']
+                month_to_bias = tf.gather(self.month_map, tf.reshape(self.months, [-1, ]))
+                fc2 = fc2 + tf.gather(self.biases['fc2_t'], month_to_bias)
+
             with tf.name_scope('drop2'):
                 # 第一dropout层
                 drop2 = tf.nn.dropout(fc2, self.keep_prob2)
@@ -341,6 +395,9 @@ class GrainNetwork(object):
         with tf.name_scope('fc3'):
             with tf.name_scope('fc3'):
                 fc3 = tf.matmul(drop2, self.weights['fc3']) + self.biases['fc3']
+                month_to_bias = tf.gather(self.month_map, tf.reshape(self.months, [-1, ]))
+                fc3 = fc3 + tf.gather(self.biases['fc3_t'], month_to_bias)
+                # print(tf.gather(self.biases['fc3_t'], tf.reshape(self.months, [-1, ])).shape)
             with tf.name_scope('drop2'):
                 #     # 第一dropout层
                 drop3 = tf.nn.dropout(fc3, self.keep_prob2)
@@ -349,19 +406,50 @@ class GrainNetwork(object):
         # 输出层
         with tf.name_scope('output'):
             output = tf.matmul(drop3, self.weights['output']) + self.biases['output']
+            month_to_bias = tf.gather(self.month_map, tf.reshape(self.months, [-1, ]))
+            output = output + tf.gather(self.biases['output_t'], month_to_bias)
         return output
 
-    def loss(self, pred):
+    def loss(self, pred, grain_type='rice'):
         # alpha = 0.8
         # beta = 1.8
-        alpha = 0.82
-        beta = 1.66
+        # alpha = 0.82
+        # beta = 1.66
+        alpha = 1
+        beta = 1
         with tf.name_scope('loss'):
-            # mse = tf.losses.mean_squared_error(labels=self.targets, predictions=pred)
-            mse = tf.reduce_sum(tf.where(tf.less(self.targets, pred), alpha * tf.square(pred-self.targets), beta * tf.square(pred-self.targets)))
+            if grain_type == 'rice':
+                month_weights = self.rice_weights
+            else:
+                month_weights = self.wheat_weights
+            weights = tf.gather(month_weights, tf.reshape(self.months, [-1, ]))
+            weights = tf.reshape(weights, [-1, 1])
+            mse = tf.losses.mean_squared_error(labels=self.targets, predictions=pred, weights=weights)
+            # mse = tf.reduce_mean(tf.where(tf.less(self.targets, pred), alpha * tf.square(pred - self.targets),
+            #                              beta * tf.square(pred - self.targets)))
+            tf.summary.scalar('loss', mse)
         return mse
 
-
+    def accuracy(self, pred, grain_type='rice'):
+        u, v = tf.constant(0, tf.float32), tf.constant(0, tf.float32)
+        y_mean = tf.reduce_mean(pred)
+        for m in range(0, 12):
+            month_mask = tf.equal(self.months, m)
+            num = tf.cast(tf.count_nonzero(tf.cast(month_mask, tf.float32)), tf.float32)
+            y_true = tf.boolean_mask(self.targets, month_mask)
+            y_pre = tf.boolean_mask(pred, month_mask)
+            # y_true_mean = tf.reduce_mean(y_true)
+            if grain_type == 'rice':
+                w = self.rice_weights[m]
+            else:
+                w = self.wheat_weights[m]
+            u = tf.add(tf.div(tf.multiply(w, tf.reduce_sum(tf.square(y_true - y_pre))), num),
+                       u)
+            v = tf.add(tf.div(tf.multiply(w, tf.reduce_sum(tf.square(y_true - y_mean))), num),
+                       v)
+        accuracy = tf.subtract(1., tf.div(u, v))
+        tf.summary.scalar('accuracy', accuracy)
+        return accuracy
 
     def optimizer(self, loss, lr=0.01):
         train_optimizer = tf.train.AdadeltaOptimizer(lr).minimize(loss)
@@ -376,19 +464,23 @@ class GrainNetwork(object):
         writer = tf.summary.FileWriter("./logs/", sess.graph)
         sess.run(tf.global_variables_initializer())
 
-    def train(self, max_iter, train_barns, test_barn, grain_type):
+    def train(self, max_iter, train_barns, test_barn, grain_type, pre_days):
         pred = self.add_layers()
         loss = self.loss(pred)
         optimizer = self.optimizer(loss, lr=0.01)
+        accuracy = self.accuracy(pred, grain_type)
+
         sess = tf.Session()
+        merged = tf.summary.merge_all()
+        writer = tf.summary.FileWriter("./logs/", sess.graph)
         sess.run(tf.global_variables_initializer())
         plt.figure(1, figsize=(15, 5))
         plt.ion()
-        batch_manager = BatchManager(train_barns, test_barn, grain_type, '2015-09-01', '2017-9-20')
+        batch_manager = BatchManager(train_barns, test_barn, grain_type, '2015-09-01', '2017-9-20', pre_days)
         pre_barn = None
         final_s_ = None
         for iter in range(max_iter):
-            cur_barn, images, features, lables, days = batch_manager.next_train_batch(500)
+            cur_barn, images, features, lables, days, months = batch_manager.next_train_batch(500)
             # images = batch_manager.X_scaler.transform(np.array(images).reshape((-1, 6 * 6 * 4)))
             # images = images.reshape((-1, 6, 6, 4))
             # features = batch_manager.F_scaler.transform(features)
@@ -396,14 +488,18 @@ class GrainNetwork(object):
             lables = np.array(lables)[:, np.newaxis]
             images = np.array(images)
             features = np.array(features)
+            # months = list(map(lambda m: self.month_map[m], months))
+            months = np.array(months)[:, np.newaxis]
             # print(images.shape)
             if cur_barn is pre_barn:
                 feed_dict = {self.images: images, self.targets: lables,
+                             self.months: months,
                              self.temperatures: features,
                              self.keep_prob1: 0.5, self.keep_prob2: 0.5,
                              self.batch_tensor: images.shape[0] / self.STEP_SIZE}
             else:
                 feed_dict = {self.images: images, self.targets: lables,
+                             self.months: months,
                              self.temperatures: features,
                              self.keep_prob1: 0.5, self.keep_prob2: 0.5,
                              self.batch_tensor: images.shape[0] / self.STEP_SIZE}
@@ -420,23 +516,25 @@ class GrainNetwork(object):
             # plt.pause(0.05)
             # plt.clf()
             print(cur_barn, 'iter', iter, 'loss', loss_)
-            if iter % 2 == 0:
+            if iter % 5 == 0:
                 batch_manager.test_dt_index = 0
-                test_imgs, test_f, test_y, days = batch_manager.next_test_batch(500)
+                test_imgs, test_f, test_y, days, months = batch_manager.next_test_batch(500)
                 # test_imgs = batch_manager.X_scaler.transform(np.array(test_imgs).reshape((-1, 6 * 6 * 4)))
                 # test_imgs = test_imgs.reshape((-1, 6, 6, 4))
                 # test_f = batch_manager.F_scaler.transform(test_f)
                 test_y = np.array(test_y)[:, np.newaxis]
                 test_imgs = np.array(test_imgs)
                 test_f = np.array(test_f)
-                # print(test_y)
-
+                months = np.array(months)[:, np.newaxis]
                 feed_dict = {self.images: test_imgs, self.targets: test_y,
+                             self.months: months,
                              self.temperatures: test_f,
                              self.keep_prob1: 1, self.keep_prob2: 1,
                              self.batch_tensor: test_imgs.shape[0] / self.STEP_SIZE}
-                pred_, loss_ = sess.run([pred, loss], feed_dict)
-                print('loss', loss_)
+                rs, pred_, loss_, accuracy_ = sess.run([merged, pred, loss, accuracy], feed_dict)
+                writer.add_summary(rs, iter)
+
+                print('loss', loss_, 'accuracy', accuracy_)
                 plt.scatter(pd.to_datetime(days), test_y.reshape(-1, ), s=20, edgecolor="black",
                             c="darkorange", label="data")
                 # plt.plot(days, test_y.reshape(-1, ), 'r-')
@@ -445,11 +543,11 @@ class GrainNetwork(object):
                 # plt.ylim((-1.2, 1.2))
                 plt.draw()
                 plt.pause(0.01)
-                plt.savefig('../figures/rice_barn9_point.png')
+                # plt.savefig('../figures/rice_barn9_point.png')
                 plt.clf()
 
-        # plt.ioff()
-        # plt.show()
+                # plt.ioff()
+                # plt.show()
 
 
 if __name__ == '__main__':
@@ -458,6 +556,6 @@ if __name__ == '__main__':
 
     barns = [2, 3, 5, 6, 7, 9, 11, 13, 14, 17, 18, 19, 21, 22, 23, 24, 29, 30, 32, 34, 35]
     barn = 9
-    net = GrainNetwork()
-    net.train(1200, barns, barn, 'rice')
+    net = GrainNetwork('../DL_data/day10_barn9.ac')
+    net.train(1200, barns, barn, 'rice', '10 days')
     # net.paint()
