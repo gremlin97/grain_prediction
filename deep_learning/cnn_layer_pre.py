@@ -200,8 +200,8 @@ class BatchManager(object):
             points_temp = np.load(dt_path)
             # print(points_temp.shape, dt, barn)
             pre_path = path + pre_dt + '.npy'
-            pre_temp = np.load(pre_path)[self.pre_point[0], self.pre_point[1], self.pre_point[2]]
-            # pre_temp = layer_temp[layer_temp['粮情时间'] == pre_dt]['平均温度'].iloc[0]
+            # pre_temp = np.load(pre_path)[self.pre_point[0], self.pre_point[1], self.pre_point[2]]
+            pre_temp = layer_temp[layer_temp['粮情时间'] == pre_dt]['平均温度'].iloc[0]
 
             # 十一天气温加时间（1-365）
             other_features.append(air_now)
@@ -360,21 +360,30 @@ class GrainNetwork(object):
                 flatten = tf.reshape(pool2, [-1, 3 * 3 * 40], name='flatten')
                 connectted = tf.concat([self.temperatures, flatten], axis=1, name='concat')
                 fc1 = tf.matmul(connectted, self.weights['fc1']) + self.biases['fc1']
-                month_to_bias = tf.gather(self.month_map, tf.reshape(self.months, [-1, ]))
-                fc1 = fc1 + tf.gather(self.biases['fc1_t'], month_to_bias)
             with tf.name_scope('drop1'):
                 # 第一dropout层
                 drop1 = tf.nn.dropout(fc1, self.keep_prob1)
                 drop1 = tf.nn.relu(drop1)
 
-
+        # RNN层
+        # with tf.name_scope('rnn'):
+        #     rnn_inputs = tf.reshape(drop1, shape=[-1, self.STEP_SIZE, 1024])
+        #     rnn_cell = tf.nn.rnn_cell.LSTMCell(num_units=512)
+        #     # rnn_cell = tf.nn.rnn_cell.DropoutWrapper(rnn_cell, output_keep_prob=self.keep_prob2)
+        #     # batch_size = tf.shape(self.batch_tensor)[0] / self.STEP_SIZE
+        #     self.init_s = rnn_cell.zero_state(batch_size=self.batch_tensor, dtype=tf.float32)
+        #     rnn_outputs, self.final_s = tf.nn.dynamic_rnn(
+        #         rnn_cell,  # cell you have chosen
+        #         rnn_inputs,  # input
+        #         initial_state=self.init_s,  # the initial hidden state
+        #         time_major=False,  # False: (batch, time step, input); True: (time step, batch, input)
+        #     )
+        #     rnn_outputs = rnn_outputs[:, -1, :]
+        #     rnn_outputs = tf.reshape(rnn_outputs, shape=[-1, 512])
         # 第二全连接层
         with tf.name_scope('fc2'):
             with tf.name_scope('fc2'):
                 fc2 = tf.matmul(drop1, self.weights['fc2']) + self.biases['fc2']
-                month_to_bias = tf.gather(self.month_map, tf.reshape(self.months, [-1, ]))
-                fc2 = fc2 + tf.gather(self.biases['fc2_t'], month_to_bias)
-
             with tf.name_scope('drop2'):
                 # 第一dropout层
                 drop2 = tf.nn.dropout(fc2, self.keep_prob2)
@@ -384,29 +393,23 @@ class GrainNetwork(object):
         with tf.name_scope('fc3'):
             with tf.name_scope('fc3'):
                 fc3 = tf.matmul(drop2, self.weights['fc3']) + self.biases['fc3']
-                month_to_bias = tf.gather(self.month_map, tf.reshape(self.months, [-1, ]))
-                fc3 = fc3 + tf.gather(self.biases['fc3_t'], month_to_bias)
-                # print(tf.gather(self.biases['fc3_t'], tf.reshape(self.months, [-1, ])).shape)
             with tf.name_scope('drop2'):
                 #     # 第一dropout层
-                drop3 = tf.nn.dropout(fc3, self.keep_prob2)
-                drop3 = tf.nn.relu(drop3)
+                # drop3 = tf.nn.dropout(fc3, self.keep_prob2)
+                drop3 = tf.nn.relu(fc3)
 
         # 输出层
         with tf.name_scope('output'):
             output = tf.matmul(drop3, self.weights['output']) + self.biases['output']
-            month_to_bias = tf.gather(self.month_map, tf.reshape(self.months, [-1, ]))
-            output = output + tf.gather(self.biases['output_t'], month_to_bias)
         return output
 
     def loss(self, pred, grain_type='rice'):
-        alpha = 0.8
-        beta = 1.8
-        # alpha = 0.82
-        # beta = 1.66
-        # alpha = 1
-        # beta = 1
+        alpha = 0.82
+        beta = 1.18
         with tf.name_scope('loss'):
+            # mse = tf.losses.mean_squared_error(labels=self.targets, predictions=pred)
+            # mse = tf.reduce_sum(tf.where(tf.less(self.targets, pred), alpha * tf.square(pred - self.targets),
+            #                              beta * tf.square(pred - self.targets)))
             if grain_type == 'rice':
                 month_weights = self.rice_weights
             else:
@@ -415,7 +418,7 @@ class GrainNetwork(object):
             weights = tf.reshape(weights, [-1, 1])
             mse = tf.losses.mean_squared_error(labels=self.targets, predictions=pred, weights=weights)
             # mse = tf.reduce_mean(tf.where(tf.less(self.targets, pred), alpha * tf.square(pred - self.targets),
-            #                              beta * tf.square(pred - self.targets)) * weights)
+            #                               beta * tf.square(pred - self.targets)) * weights)
             tf.summary.scalar('loss', mse)
         return mse
 
@@ -526,17 +529,17 @@ class GrainNetwork(object):
 
                 print('loss', loss_, 'accuracy', accuracy_)
                 self.output_file.write(str(iter) + ',' + str(accuracy_) + '\n')
-                plt.scatter(pd.to_datetime(days), test_y.reshape(-1, ), c="darkorange", s=20, edgecolor="black", label="data")
+                plt.plot(pd.to_datetime(days), test_y.reshape(-1, ), "darkorange", label="data")
                 # plt.plot(days, test_y.reshape(-1, ), 'r-')
                 plt.plot(pd.to_datetime(days), pred_.reshape(-1, ), 'b-', label='prediction')
                 plt.legend()
                 # plt.ylim((-1.2, 1.2))
                 plt.draw()
                 plt.pause(0.01)
-                # plt.savefig('../figures/rice_barn9_point.png')
+                # # plt.savefig('../figures/rice_barn9_point.png')
                 plt.clf()
-
-                # plt.ioff()
+                #
+                # # plt.ioff()
                 plt.show()
 
 
@@ -544,10 +547,10 @@ if __name__ == '__main__':
     # wheat [1,8,10,12,15,16,20,26,27,28,31,33]
     # rice [2,3,5,6,7,9,11,13,14,17,18,19,21,22,23,24,29,30,32,34,35]
     barns = [2, 3, 5, 6, 7, 9, 11, 13, 14, 17, 18, 19, 21, 22, 23, 24, 29, 30, 32, 34, 35]
-
     barn = 9
+
     # 参数 输出文件 预测天数
-    net = GrainNetwork('../DL_data/accuracy/day7_barn9_point0.ac', 7)
+    net = GrainNetwork('../DL_data/accuracy/day7_barn{}_layer{}_2.ac'.format(barn, 1), 7)
     # 参数 迭代次数 总仓 预测仓 预测粮食种类 [0-3, 0-5, 0-5] 层、行、列
     net.train(1200, barns, barn, 'rice', [0, 1, 1])
     # net.paint()
