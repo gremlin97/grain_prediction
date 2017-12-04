@@ -547,10 +547,12 @@ if __name__ == '__main__':
     # wheat [1,8,10,12,15,16,20,26,27,28,31,33]
     # rice [2,3,5,6,7,9,11,13,14,17,18,19,21,22,23,24,29,30,32,34,35]
     barns = [2, 3, 5, 6, 7, 9, 11, 13, 14, 17, 18, 19, 21, 22, 23, 24, 29, 30, 32, 34, 35]
-    barn = 9
 
     # 参数 输出文件 预测天数
-    net = GrainNetwork('../DL_data/accuracy/day7_barn{}_layer{}_2.ac'.format(barn, 1), 7)
-    # 参数 迭代次数 总仓 预测仓 预测粮食种类 [0-3, 0-5, 0-5] 层、行、列
-    net.train(1200, barns, barn, 'rice', [0, 1, 1])
-    # net.paint()
+    for day in range(1, 16):
+        for barn in barns:
+                with tf.Graph().as_default() as g:
+                    ac_file = '../DL_data/accuracy/day{}_barn{}.ac'.format(day, barn)
+                    net = GrainNetwork(ac_file, day)
+                    net.train(1200, barns, barn, 'rice', [0, 1, 1])
+                    # net.paint()

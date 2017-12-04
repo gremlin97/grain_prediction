@@ -367,7 +367,6 @@ class GrainNetwork(object):
                 drop1 = tf.nn.dropout(fc1, self.keep_prob1)
                 drop1 = tf.nn.relu(drop1)
 
-
         # 第二全连接层
         with tf.name_scope('fc2'):
             with tf.name_scope('fc2'):
@@ -526,7 +525,9 @@ class GrainNetwork(object):
 
                 print('loss', loss_, 'accuracy', accuracy_)
                 self.output_file.write(str(iter) + ',' + str(accuracy_) + '\n')
-                plt.scatter(pd.to_datetime(days), test_y.reshape(-1, ), c="darkorange", s=20, edgecolor="black", label="data")
+                # plt.scatter(pd.to_datetime(days), test_y.reshape(-1, ), c="darkorange", s=20, edgecolor="black",
+                #             label="data")
+                plt.plot(pd.to_datetime(days), test_y.reshape(-1, ), "darkorange", label="data")
                 # plt.plot(days, test_y.reshape(-1, ), 'r-')
                 plt.plot(pd.to_datetime(days), pred_.reshape(-1, ), 'b-', label='prediction')
                 plt.legend()
@@ -538,6 +539,7 @@ class GrainNetwork(object):
 
                 # plt.ioff()
                 plt.show()
+        sess.close()
 
 
 if __name__ == '__main__':
@@ -547,7 +549,15 @@ if __name__ == '__main__':
 
     barn = 9
     # 参数 输出文件 预测天数
-    net = GrainNetwork('../DL_data/accuracy/day7_barn9_point0.ac', 7)
-    # 参数 迭代次数 总仓 预测仓 预测粮食种类 [0-3, 0-5, 0-5] 层、行、列
-    net.train(1200, barns, barn, 'rice', [0, 1, 1])
-    # net.paint()
+
+    for day in range(1, 16):
+        for barn in barns:
+            for z in range(0, 4):
+                for y in range(0, 6):
+                    for x in range(0, 6):
+                        with tf.Graph().as_default() as g:
+                            ac_file = '../DL_data/accuracy/day{}_barn{}_z{}y{}x{}.ac'.format(day, barn, z, y, x)
+                            net = GrainNetwork(ac_file, day)
+                            # 参数 迭代次数 总仓 预测仓 预测粮食种类 [0-3, 0-5, 0-5] 层、行、列
+                            net.train(1, barns, barn, 'rice', [z, y, x])
+                            # net.paint()

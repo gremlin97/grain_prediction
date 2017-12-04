@@ -8,7 +8,7 @@ if __name__ == '__main__':
 
     # wheat [1,8,10,12,15,16,20,26,27,28,31,33]
     # rice [2,3,5,6,7,9,11,13,14,17,18,19,21,22,23,24,29,30,32,34,35]
-    barns = [1,8,10,12,15,16,20,26,27,28,31,33]
+    barns = [2,3,5,6,7,9,11,13,14,17,18,19,21,22,23,24,29,30,32,34,35]
     barn_list = []  # 仓库信息
     aver_list = []  # 平均温度
     dt_list = []  # 粮情时间
@@ -19,7 +19,8 @@ if __name__ == '__main__':
             file_path = barn_path + file_name
             arr = np.load(file_path)
             # 求得层平均
-            layers = arr.mean(axis=2).mean(axis=1)
+            # layers = arr.mean(axis=2).mean(axis=1)
+            layers = arr[:, 1, 1] # 四个层的某个点
             # 粮情时间
             dt = file_name.split('.')[0]
             # 平均温度
@@ -33,4 +34,4 @@ if __name__ == '__main__':
         '平均温度': aver_list,
         '粮情时间': dt_list
     }).sort_values(by=['仓库信息', '粮情时间'])
-    df.to_csv('../data/wheat_by_layer/wheat_layer_4.csv', index=None)
+    df.to_csv('../data/rice_by_point/rice_point_4.csv', index=None)
