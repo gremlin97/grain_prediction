@@ -134,7 +134,7 @@ if __name__ == '__main__':
         bs = grain_barns.copy()
         bs.remove(barn)
         lp = LearnPredic()
-        lp.load_data('data/features/feature_rice_layer1_7days/', bs, barn)
+        lp.load_data('data/back_up/feature_rice_layer1_10days/', bs, barn)
         lp.learn()
         # plt.savefig('figures/barn_'+str(barn)+'_layer_1.png')
         plt.close('all')

@@ -120,7 +120,7 @@ class ExtractPoints:
         if not os.path.exists(path):
             print(path, 'did not exist')
             os.mkdir(path)
-        np.save(filename, arr)
+        # np.save(filename, arr)
         print(filename, 'saved')
         # del self.points_data[self.points_data['关联粮情ID'] == sid]
 

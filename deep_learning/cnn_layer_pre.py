@@ -473,7 +473,7 @@ class GrainNetwork(object):
         pre_barn = None
         final_s_ = None
         for iter in range(max_iter):
-            cur_barn, images, features, lables, days, months = batch_manager.next_train_batch(500)
+            cur_barn, images, features, lables, days, months = batch_manager.next_train_batch(1000)
             # images = batch_manager.X_scaler.transform(np.array(images).reshape((-1, 6 * 6 * 4)))
             # images = images.reshape((-1, 6, 6, 4))
             # features = batch_manager.F_scaler.transform(features)
@@ -511,7 +511,7 @@ class GrainNetwork(object):
             print(cur_barn, 'iter', iter, 'loss', loss_)
             if iter % 5 == 0:
                 batch_manager.test_dt_index = 0
-                test_imgs, test_f, test_y, days, months = batch_manager.next_test_batch(500)
+                test_imgs, test_f, test_y, days, months = batch_manager.next_test_batch(1000)
                 # test_imgs = batch_manager.X_scaler.transform(np.array(test_imgs).reshape((-1, 6 * 6 * 4)))
                 # test_imgs = test_imgs.reshape((-1, 6, 6, 4))
                 # test_f = batch_manager.F_scaler.transform(test_f)
@@ -554,5 +554,5 @@ if __name__ == '__main__':
                 with tf.Graph().as_default() as g:
                     ac_file = '../DL_data/accuracy/day{}_barn{}.ac'.format(day, barn)
                     net = GrainNetwork(ac_file, day)
-                    net.train(1200, barns, barn, 'rice', [0, 1, 1])
+                    net.train(600, barns, 9, 'rice', [0, 1, 1])
                     # net.paint()
