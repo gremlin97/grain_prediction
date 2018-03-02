@@ -57,6 +57,12 @@ class BatchManager(object):
         self.data_cache = {}
         self.pre_days = pre_days
         self.pre_point = pre_point
+        # 月份One-hot编码器
+        from sklearn.preprocessing import OneHotEncoder
+        self.month_encoder = OneHotEncoder(n_values=12, dtype=np.float32, handle_unknown='error')
+        self.month_encoder.fit(np.arange(12).reshape((-1, 1)))
+
+
 
     def truncation(self, *batches):
         result = []
@@ -208,8 +214,10 @@ class BatchManager(object):
             day_in_year = int(pd.to_datetime(pre_dt).strftime('%j'))
             # month 0-11
             month = int(pd.to_datetime(pre_dt).strftime('%m')) - 1
-            # day_in_year
-            other_features.append(day_in_year / 365 - 0.5)
+            # # day_in_year
+            # other_features.append(day_in_year / 365 - 0.5)
+            # one-hot 月份信息
+            other_features.extend(self.month_encoder.transform([[month]]).toarray().reshape(-1, ))
             return True, np.array(points_temp).transpose([2, 1, 0]), np.array(other_features), pre_temp, pre_dt, month
         else:
             return False, None, None, None, None, None
@@ -238,18 +246,18 @@ class GrainNetwork(object):
                 # 6*6*20->6*6*40->3*3*40
                 'conv2': tf.get_variable('W_conv2', [2, 2, 20, 40],
                                          initializer=tf.contrib.layers.xavier_initializer_conv2d()),
-                # 3*3*40+11+2->1024
-                'fc1': tf.get_variable('W_fc1', [3 * 3 * 40 + pre_days + 2, 800],
+                # 3*3*40+predays+1+12->1024
+                'fc1': tf.get_variable('W_fc1', [3 * 3 * 40 + pre_days + 13, 1024],
                                        initializer=tf.contrib.layers.xavier_initializer()),
                 # 1024->512
                 # 512->64
-                'fc2': tf.get_variable('W_fc2', [800, 500],
+                'fc2': tf.get_variable('W_fc2', [1024, 512],
                                        initializer=tf.contrib.layers.xavier_initializer()),
                 # 256->64
-                'fc3': tf.get_variable('W_fc3', [500, 300],
+                'fc3': tf.get_variable('W_fc3', [512, 256],
                                        initializer=tf.contrib.layers.xavier_initializer()),
                 # 64->1
-                'output': tf.get_variable('W_output', [300, 1],
+                'output': tf.get_variable('W_output', [256, 1],
                                           initializer=tf.contrib.layers.xavier_initializer()),
             }
 
@@ -259,18 +267,18 @@ class GrainNetwork(object):
                                          initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
                 'conv2': tf.get_variable('b_conv2', [40, ],
                                          initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
-                'fc1': tf.get_variable('b_fc1', [800, ],
+                'fc1': tf.get_variable('b_fc1', [1024, ],
                                        initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
-                'fc1_t': tf.get_variable('bt_fc1', [12, 800],
+                'fc1_t': tf.get_variable('bt_fc1', [12, 1024],
                                          initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
-                'fc2': tf.get_variable('b_fc2', [500, ],
+                'fc2': tf.get_variable('b_fc2', [512, ],
                                        initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
-                'fc2_t': tf.get_variable('bt_fc2', [12, 500],
+                'fc2_t': tf.get_variable('bt_fc2', [12, 512],
                                          initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
 
-                'fc3': tf.get_variable('b_fc3', [300, ],
+                'fc3': tf.get_variable('b_fc3', [256, ],
                                        initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
-                'fc3_t': tf.get_variable('bt_fc3', [12, 300],
+                'fc3_t': tf.get_variable('bt_fc3', [12, 256],
                                          initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
                 'output': tf.get_variable('b_output', [1, ],
                                           initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
@@ -282,7 +290,7 @@ class GrainNetwork(object):
             # 输入类图片和温度
         with tf.name_scope('inputs'):
             self.images = tf.placeholder(tf.float32, [None, 6, 6, 4], name='images')
-            self.temperatures = tf.placeholder(tf.float32, [None, pre_days + 2], name='temperatures')
+            self.temperatures = tf.placeholder(tf.float32, [None, pre_days + 1 + 12], name='temperatures')
         with tf.name_scope('targets'):
             self.targets = tf.placeholder(tf.float32, [None, 1], name='targets')
             self.months = tf.placeholder(tf.int32, [None, 1], name='months')
@@ -334,9 +342,12 @@ class GrainNetwork(object):
             with tf.name_scope('relu'):
                 conv1 = tf.nn.relu(conv1)
 
+
         # # 第一平均池化层
         # with tf.name_scope('pool1'):
-        #     pool1 = tf.nn.avg_pool(conv1, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding='VALID')
+        #     pool1 = tf.nn.avg_pool(conv1, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding='SAME')
+
+
 
         # 第二卷积层
         with tf.name_scope('conv2'):
@@ -347,7 +358,6 @@ class GrainNetwork(object):
                 )
             with tf.name_scope('relu'):
                 conv2 = tf.nn.relu(conv2)
-
         # 第二平均池化层
         with tf.name_scope('pool2'):
             pool2 = tf.nn.avg_pool(conv2, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding='VALID')
@@ -355,6 +365,7 @@ class GrainNetwork(object):
         # 第一全连接层
         with tf.name_scope('fc1'):
             with tf.name_scope('fc1'):
+
                 flatten = tf.reshape(pool2, [-1, 3 * 3 * 40], name='flatten')
                 connectted = tf.concat([self.temperatures, flatten], axis=1, name='concat')
                 fc1 = tf.matmul(connectted, self.weights['fc1']) + self.biases['fc1']
@@ -468,6 +479,7 @@ class GrainNetwork(object):
         final_s_ = None
         for iter in range(max_iter):
             cur_barn, images, features, lables, days, months = batch_manager.next_train_batch(1000)
+
             # images = batch_manager.X_scaler.transform(np.array(images).reshape((-1, 6 * 6 * 4)))
             # images = images.reshape((-1, 6, 6, 4))
             # features = batch_manager.F_scaler.transform(features)
@@ -531,7 +543,7 @@ class GrainNetwork(object):
                 plt.legend()
                 # plt.ylim((-1.2, 1.2))
                 plt.draw()
-                plt.pause(0.01)
+                plt.pause(0.001)
                 # plt.savefig('../figures/rice_barn9_point.png')
                 plt.clf()
 
@@ -554,8 +566,14 @@ if __name__ == '__main__':
                 for y in range(0, 6):
                     for x in range(0, 6):
                         with tf.Graph().as_default() as g:
-                            ac_file = '../DL_data/accuracy/day{}_barn{}_z{}y{}x{}.ac'.format(day, barn, z, y, x)
-                            net = GrainNetwork(ac_file, day)
-                            # 参数 迭代次数 总仓 预测仓 预测粮食种类 [0-3, 0-5, 0-5] 层、行、列
-                            net.train(1200, barns, barn, 'rice', [z, y, x])
-                            # net.paint()
+                            if y == x:
+                                ac_dir = '../DL_data/accuracy/day{}/barn{}'.format(day,barn)
+                                if not os.path.exists(ac_dir):
+                                    os.makedirs(ac_dir)
+                                ac_file = '../DL_data/accuracy/day{}/barn{}/z{}y{}x{}.ac'.format(day, barn, z, y, x)
+                                if os.path.exists(ac_file):
+                                    continue
+                                net = GrainNetwork(ac_file, day)
+                                # 参数 迭代次数 总仓 预测仓 预测粮食种类 [0-3, 0-5, 0-5] 层、行、列
+                                net.train(800, barns, barn, 'rice', [z, y, x])
+                                # net.paint()

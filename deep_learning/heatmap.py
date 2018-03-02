@@ -215,9 +215,9 @@ class BatchManager(object):
 
 if __name__ == '__main__':
     # barns = [2, 3, 5, 6, 7, 9, 11, 13, 14, 17, 18, 19, 21, 22, 23, 24, 29, 30, 32, 34, 35]
-    barns = [1,8,10,12,15,16,20,26,27,28,31,33]
+    barns = [1, 8, 10, 12, 15, 16, 20, 26, 27, 28, 31, 33]
     # barns = [1]
-    for day in range(14, 15):
+    for day in range(10, 11):
 
         IMGs = []
         LABLEs = []
@@ -227,9 +227,10 @@ if __name__ == '__main__':
             cur_barn, images, features, lables, days, months = batch_manager.next_train_batch(1000)
             IMGs.extend(images)
             LABLEs.extend(lables)
-
-        Y = np.array(LABLEs)[:, 1, 5, 5]
+        z, y, x = 1, 5, 5
+        Y = np.array(LABLEs)[:, z, y, x]
         print(np.array(IMGs)[:, :, :, 0].shape)
+        dir_path = 'z{}y{}x{}'.format(z, y, x)
         for layer in range(4):
             LAYER = np.array(IMGs)[:, :, :, layer].reshape((-1, 36)).transpose([1, 0])
             print(LAYER.shape)
@@ -241,6 +242,8 @@ if __name__ == '__main__':
             plt.title('Pearson Correlation of Features', y=1.05, size=15)
             colormap = plt.cm.RdBu
             sns.heatmap(corr, linewidths=0.1, vmax=1.0,
-                square=True, cmap=colormap, linecolor='white', annot=True)
+                        square=True, cmap=colormap, linecolor='white', annot=True)
+            if not os.path.exists(dir_path):
+                os.mkdir(dir_path)
             plt.savefig('layer{}.png'.format(layer))
             plt.close()
