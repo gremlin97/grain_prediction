@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import os
 
 import matplotlib.pyplot as plt
@@ -247,17 +248,17 @@ class GrainNetwork(object):
                 'conv2': tf.get_variable('W_conv2', [2, 2, 20, 40],
                                          initializer=tf.contrib.layers.xavier_initializer_conv2d()),
                 # 3*3*40+predays+1+12->1024
-                'fc1': tf.get_variable('W_fc1', [3 * 3 * 40 + pre_days + 13, 1024],
-                                       initializer=tf.contrib.layers.xavier_initializer()),
+                'fc1': tf.get_variable('W_fc1', [3 * 3 * 40 + pre_days + 13, 512],
+                                        initializer=tf.contrib.layers.xavier_initializer()),
                 # 1024->512
                 # 512->64
-                'fc2': tf.get_variable('W_fc2', [1024, 512],
+                'fc2': tf.get_variable('W_fc2', [512, 256],
                                        initializer=tf.contrib.layers.xavier_initializer()),
                 # 256->64
-                'fc3': tf.get_variable('W_fc3', [512, 256],
-                                       initializer=tf.contrib.layers.xavier_initializer()),
+                'fc3': tf.get_variable('W_fc3', [256, 64],
+                                      initializer=tf.contrib.layers.xavier_initializer()),
                 # 64->1
-                'output': tf.get_variable('W_output', [256, 1],
+                'output': tf.get_variable('W_output', [64, 1],
                                           initializer=tf.contrib.layers.xavier_initializer()),
             }
 
@@ -267,18 +268,18 @@ class GrainNetwork(object):
                                          initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
                 'conv2': tf.get_variable('b_conv2', [40, ],
                                          initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
-                'fc1': tf.get_variable('b_fc1', [1024, ],
+                'fc1': tf.get_variable('b_fc1', [512, ],
                                        initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
-                'fc1_t': tf.get_variable('bt_fc1', [12, 1024],
+                'fc1_t': tf.get_variable('bt_fc1', [12, 512],
                                          initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
-                'fc2': tf.get_variable('b_fc2', [512, ],
+                'fc2': tf.get_variable('b_fc2', [256, ],
                                        initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
-                'fc2_t': tf.get_variable('bt_fc2', [12, 512],
+                'fc2_t': tf.get_variable('bt_fc2', [12, 256],
                                          initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
 
-                'fc3': tf.get_variable('b_fc3', [256, ],
+                'fc3': tf.get_variable('b_fc3', [64, ],
                                        initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
-                'fc3_t': tf.get_variable('bt_fc3', [12, 256],
+                'fc3_t': tf.get_variable('bt_fc3', [12, 64],
                                          initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
                 'output': tf.get_variable('b_output', [1, ],
                                           initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
@@ -376,7 +377,7 @@ class GrainNetwork(object):
                 drop1 = tf.nn.dropout(fc1, self.keep_prob1)
                 drop1 = tf.nn.relu(drop1)
 
-        # 第二全连接层
+        #第二全连接层
         with tf.name_scope('fc2'):
             with tf.name_scope('fc2'):
                 fc2 = tf.matmul(drop1, self.weights['fc2']) + self.biases['fc2']
@@ -388,17 +389,17 @@ class GrainNetwork(object):
                 drop2 = tf.nn.dropout(fc2, self.keep_prob2)
                 drop2 = tf.nn.relu(drop2)
 
-        # 第三全连接层
+        #第三全连接层
         with tf.name_scope('fc3'):
-            with tf.name_scope('fc3'):
-                fc3 = tf.matmul(drop2, self.weights['fc3']) + self.biases['fc3']
-                month_to_bias = tf.gather(self.month_map, tf.reshape(self.months, [-1, ]))
-                fc3 = fc3 + tf.gather(self.biases['fc3_t'], month_to_bias)
-                # print(tf.gather(self.biases['fc3_t'], tf.reshape(self.months, [-1, ])).shape)
-            with tf.name_scope('drop2'):
-                #     # 第一dropout层
-                drop3 = tf.nn.dropout(fc3, self.keep_prob2)
-                drop3 = tf.nn.relu(drop3)
+           with tf.name_scope('fc3'):
+               fc3 = tf.matmul(drop2, self.weights['fc3']) + self.biases['fc3']
+               month_to_bias = tf.gather(self.month_map, tf.reshape(self.months, [-1, ]))
+               fc3 = fc3 + tf.gather(self.biases['fc3_t'], month_to_bias)
+               # print(tf.gather(self.biases['fc3_t'], tf.reshape(self.months, [-1, ])).shape)
+           with tf.name_scope('drop2'):
+               #     # 第一dropout层
+               drop3 = tf.nn.dropout(fc3, self.keep_prob2)
+               drop3 = tf.nn.relu(drop3)
 
         # 输出层
         with tf.name_scope('output'):
@@ -535,9 +536,9 @@ class GrainNetwork(object):
 
                 print('loss', loss_, 'accuracy', accuracy_)
                 self.output_file.write(str(iter) + ',' + str(accuracy_) + '\n')
-                # plt.scatter(pd.to_datetime(days), test_y.reshape(-1, ), c="darkorange", s=20, edgecolor="black",
-                #             label="data")
-                plt.plot(pd.to_datetime(days), test_y.reshape(-1, ), "darkorange", label="data")
+                plt.scatter(pd.to_datetime(days), test_y.reshape(-1, ), c="darkorange", s=20, edgecolor="black",
+                            label="data")
+                # plt.plot(pd.to_datetime(days), test_y.reshape(-1, ), "darkorange", label="data")
                 # plt.plot(days, test_y.reshape(-1, ), 'r-')
                 plt.plot(pd.to_datetime(days), pred_.reshape(-1, ), 'b-', label='prediction')
                 plt.legend()
@@ -561,19 +562,17 @@ if __name__ == '__main__':
     # 参数 输出文件 预测天数
 
     for day in range(15, 16):
-        for barn in barns:
+        for barn in barns[15:]:
             for z in range(0, 4):
                 for y in range(0, 6):
                     for x in range(0, 6):
                         with tf.Graph().as_default() as g:
                             if y == x:
-                                ac_dir = '../DL_data/accuracy/day{}/barn{}'.format(day,barn)
+                                ac_dir = '../DL_data/accuracy/512_3l_full_features_day{}/barn{}'.format(day,barn)
                                 if not os.path.exists(ac_dir):
                                     os.makedirs(ac_dir)
-                                ac_file = '../DL_data/accuracy/day{}/barn{}/z{}y{}x{}.ac'.format(day, barn, z, y, x)
-                                if os.path.exists(ac_file):
-                                    continue
+                                ac_file = '../DL_data/accuracy/512_3l_full_features_day{}/barn{}/z{}y{}x{}.ac'.format(day, barn, z, y, x)
                                 net = GrainNetwork(ac_file, day)
                                 # 参数 迭代次数 总仓 预测仓 预测粮食种类 [0-3, 0-5, 0-5] 层、行、列
-                                net.train(800, barns, barn, 'rice', [z, y, x])
+                                net.train(1200, barns, barn, 'rice', [z, y, x])
                                 # net.paint()
