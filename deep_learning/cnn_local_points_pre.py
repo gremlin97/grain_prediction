@@ -217,7 +217,7 @@ class BatchManager(object):
             # day_in_year
             # other_features.append(day_in_year / 365 - 0.5)
             # one-hot 月份信息
-            # other_features.extend(self.month_encoder.transform([[month]]).toarray().reshape(-1, ))
+            other_features.extend(self.month_encoder.transform([[month]]).toarray().reshape(-1, ))
             return True, np.array(points_temp).transpose([2, 1, 0]), np.array(other_features), pre_temp, pre_dt, month
         else:
             return False, None, None, None, None, None
@@ -247,17 +247,17 @@ class GrainNetwork(object):
                 'conv2': tf.get_variable('W_conv2', [2, 2, 20, 40],
                                          initializer=tf.contrib.layers.xavier_initializer_conv2d()),
                 # 3*3*40+predays+1+12->1024
-                'fc1': tf.get_variable('W_fc1', [local_shape[0] * local_shape[1] * 40 + pre_days + 1, 512],
+                'fc1': tf.get_variable('W_fc1', [local_shape[0] * local_shape[1] * 40 + pre_days + 12 + 1, 1024],
                                        initializer=tf.contrib.layers.xavier_initializer()),
                 # 1024->512
                 # 512->64
-                'fc2': tf.get_variable('W_fc2', [512, 256],
+                'fc2': tf.get_variable('W_fc2', [1024, 512],
                                        initializer=tf.contrib.layers.xavier_initializer()),
                 # 256->64
-                'fc3': tf.get_variable('W_fc3', [256, 64],
+                'fc3': tf.get_variable('W_fc3', [512, 256],
                                        initializer=tf.contrib.layers.xavier_initializer()),
                 # 64->1
-                'output': tf.get_variable('W_output', [64, 1],
+                'output': tf.get_variable('W_output', [256, 1],
                                           initializer=tf.contrib.layers.xavier_initializer()),
             }
 
@@ -267,18 +267,18 @@ class GrainNetwork(object):
                                          initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
                 'conv2': tf.get_variable('b_conv2', [40, ],
                                          initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
-                'fc1': tf.get_variable('b_fc1', [512, ],
+                'fc1': tf.get_variable('b_fc1', [1024, ],
                                        initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
-                'fc1_t': tf.get_variable('bt_fc1', [12, 512],
+                'fc1_t': tf.get_variable('bt_fc1', [12, 1024],
                                          initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
-                'fc2': tf.get_variable('b_fc2', [256, ],
+                'fc2': tf.get_variable('b_fc2', [512, ],
                                        initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
-                'fc2_t': tf.get_variable('bt_fc2', [12, 256],
+                'fc2_t': tf.get_variable('bt_fc2', [12, 512],
                                          initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
 
-                'fc3': tf.get_variable('b_fc3', [64, ],
+                'fc3': tf.get_variable('b_fc3', [256, ],
                                        initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
-                'fc3_t': tf.get_variable('bt_fc3', [12, 64],
+                'fc3_t': tf.get_variable('bt_fc3', [12, 256],
                                          initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
                 'output': tf.get_variable('b_output', [1, ],
                                           initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
@@ -291,7 +291,7 @@ class GrainNetwork(object):
         with tf.name_scope('inputs'):
             self.images = tf.placeholder(tf.float32, [None, local_shape[0], local_shape[1], local_shape[2]],
                                          name='images')
-            self.temperatures = tf.placeholder(tf.float32, [None, pre_days + 1], name='temperatures')
+            self.temperatures = tf.placeholder(tf.float32, [None, pre_days + 12 + 1], name='temperatures')
         with tf.name_scope('targets'):
             self.targets = tf.placeholder(tf.float32, [None, 1], name='targets')
             self.months = tf.placeholder(tf.int32, [None, 1], name='months')
@@ -438,6 +438,8 @@ class GrainNetwork(object):
                 w = self.rice_weights[m]
             else:
                 w = self.wheat_weights[m]
+            u = tf.cond(tf.is_nan(u), lambda: tf.constant(0, tf.float32), lambda: u)
+            v = tf.cond(tf.is_nan(v), lambda: tf.constant(0, tf.float32), lambda: v)
             u = tf.add(tf.div(tf.multiply(w, tf.reduce_sum(tf.square(y_true - y_pre))), num),
                        u)
             v = tf.add(tf.div(tf.multiply(w, tf.reduce_sum(tf.square(y_true - y_mean))), num),
@@ -450,14 +452,14 @@ class GrainNetwork(object):
         train_optimizer = tf.train.AdadeltaOptimizer(lr).minimize(loss)
         return train_optimizer
 
-    def paint(self):
-        pred = self.add_layers()
-        loss = self.loss(pred)
-        optimizer = self.optimizer(loss, lr=0.01)
-        sess = tf.Session()
-        merged = tf.summary.merge_all()
-        writer = tf.summary.FileWriter("./logs/", sess.graph)
-        sess.run(tf.global_variables_initializer())
+    # def paint(self):
+    #     pred = self.add_layers()
+    #     loss = self.loss(pred)
+    #     optimizer = self.optimizer(loss, lr=0.01)
+    #     sess = tf.Session()
+    #     merged = tf.summary.merge_all()
+    #     writer = tf.summary.FileWriter("./logs/", sess.graph)
+    #     sess.run(tf.global_variables_initializer())
 
     def train(self, max_iter, train_barns, test_barn, grain_type, pre_point):
         pred = self.add_layers()
@@ -465,12 +467,12 @@ class GrainNetwork(object):
         optimizer = self.optimizer(loss, lr=0.01)
         accuracy = self.accuracy(pred, grain_type)
 
-        sess = tf.Session()
+        sess = tf.Session(config=tf.ConfigProto(device_count={'gpu': 0}))
         merged = tf.summary.merge_all()
         writer = tf.summary.FileWriter("./logs/", sess.graph)
         sess.run(tf.global_variables_initializer())
-        plt.figure(1, figsize=(15, 5))
-        plt.ion()
+        # plt.figure(1, figsize=(15, 5))
+        # plt.ion()
         batch_manager = BatchManager(train_barns, test_barn, grain_type, '2015-09-01', '2017-9-20', self.pre_days,
                                      pre_point)
         pre_barn = None
@@ -540,16 +542,16 @@ class GrainNetwork(object):
                             label="data")
                 # plt.plot(pd.to_datetime(days), test_y.reshape(-1, ), "darkorange", label="data")
                 # plt.plot(days, test_y.reshape(-1, ), 'r-')
-                plt.plot(pd.to_datetime(days), pred_.reshape(-1, ), 'b-', label='prediction')
-                plt.legend()
+                # plt.plot(pd.to_datetime(days), pred_.reshape(-1, ), 'b-', label='prediction')
+                # plt.legend()
                 # plt.ylim((-1.2, 1.2))
-                plt.draw()
-                plt.pause(0.01)
+                # plt.draw()
+                # plt.pause(0.01)
                 # plt.savefig('../figures/rice_barn9_point.png')
-                plt.clf()
+                # plt.clf()
 
                 # plt.ioff()
-                plt.show()
+                # plt.show()
         sess.close()
 
 
@@ -562,23 +564,24 @@ if __name__ == '__main__':
     # 参数 输出文件 预测天数
 
     for day in range(15, 16):
-        for barn in barns[15:]:
+        for barn in barns[0:5]:
             for z in range(0, 4):
                 for y in range(0, 6):
                     for x in range(0, 6):
                         if y == x:
                             with tf.Graph().as_default() as g:
-                                ac_dir = '../DL_data/accuracy/512_3l_local_monthless_features_day{}/barn{}'.format(day, barn)
+                                ac_dir = '../DL_data/accuracy/1024_local_features_day{}/barn{}'.format(day,
+                                                                                                                 barn)
                                 if not os.path.exists(ac_dir):
                                     os.makedirs(ac_dir)
-                                ac_file = '../DL_data/accuracy/512_3l_local_monthless_features_day{}/barn{}/z{}y{}x{}.ac'.format(
+                                ac_file = '../DL_data/accuracy/1024_local_features_day{}/barn{}/z{}y{}x{}.ac'.format(
                                     day, barn, z, y, x)
                                 if os.path.exists(ac_file):
                                     continue
                                 local_shape = np.empty((6, 6, 4))[max(x - 1, 0):x + 2, max(y - 1, 0):y + 2,
                                               max(z - 1, 0):z + 2].shape
-                                print x, y, z
-                                print local_shape
+                                print(x, y, z)
+                                print(local_shape)
                                 net = GrainNetwork(ac_file, day, local_shape)
                                 # 参数 迭代次数 总仓 预测仓 预测粮食种类 [0-3, 0-5, 0-5] 层、行、列
                                 net.train(1200, barns, barn, 'rice', [z, y, x])
