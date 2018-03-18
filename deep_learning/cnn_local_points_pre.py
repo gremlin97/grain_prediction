@@ -445,7 +445,7 @@ class GrainNetwork(object):
             v = tf.add(tf.div(tf.multiply(w, tf.reduce_sum(tf.square(y_true - y_mean))), num),
                        v)
         accuracy = tf.subtract(1., tf.div(u, v))
-        tf.summary.scalar('accuracy', accuracy)
+        tf.summary.scalar('dl_ac', accuracy)
         return accuracy
 
     def optimizer(self, loss, lr=0.01):
@@ -476,21 +476,14 @@ class GrainNetwork(object):
         batch_manager = BatchManager(train_barns, test_barn, grain_type, '2015-09-01', '2017-9-20', self.pre_days,
                                      pre_point)
         pre_barn = None
-        final_s_ = None
         for iter in range(max_iter):
             cur_barn, images, features, lables, days, months = batch_manager.next_train_batch(1000)
-            # images = batch_manager.X_scaler.transform(np.array(images).reshape((-1, 6 * 6 * 4)))
-            # images = images.reshape((-1, 6, 6, 4))
-            # features = batch_manager.F_scaler.transform(features)
-            # cur_barn, images, features, lables = batch_manager.whole_train()
             lables = np.array(lables)[:, np.newaxis]
             images = np.array(images)
             z_, y_, x_ = pre_point
             images = images[:, max(x_ - 1, 0):x_ + 2, max(y_ - 1, 0):y_ + 2, max(z_ - 1, 0):z_ + 2]
             features = np.array(features)
-            # months = list(map(lambda m: self.month_map[m], months))
             months = np.array(months)[:, np.newaxis]
-            # print(images.shape)
             if cur_barn is pre_barn:
                 feed_dict = {self.images: images, self.targets: lables,
                              self.months: months,
@@ -504,7 +497,6 @@ class GrainNetwork(object):
                              self.keep_prob1: 0.5, self.keep_prob2: 0.5,
                              self.batch_tensor: images.shape[0] / self.STEP_SIZE}
             pre_barn = cur_barn
-            # print(lables, features)
             _, pred_, loss_ = sess.run([optimizer, pred, loss], feed_dict)
             # plt.scatter(days, lables.reshape(-1, ), s=20, edgecolor="black",
             #             c="darkorange", label="data")
@@ -519,9 +511,6 @@ class GrainNetwork(object):
             if iter % 5 == 0:
                 batch_manager.test_dt_index = 0
                 test_imgs, test_f, test_y, days, months = batch_manager.next_test_batch(1000)
-                # test_imgs = batch_manager.X_scaler.transform(np.array(test_imgs).reshape((-1, 6 * 6 * 4)))
-                # test_imgs = test_imgs.reshape((-1, 6, 6, 4))
-                # test_f = batch_manager.F_scaler.transform(test_f)
                 test_y = np.array(test_y)[:, np.newaxis]
                 test_imgs = np.array(test_imgs)
                 z_, y_, x_ = pre_point
@@ -536,7 +525,7 @@ class GrainNetwork(object):
                 rs, pred_, loss_, accuracy_ = sess.run([merged, pred, loss, accuracy], feed_dict)
                 writer.add_summary(rs, iter)
 
-                print('loss', loss_, 'accuracy', accuracy_)
+                print('loss', loss_, 'dl_ac', accuracy_)
                 self.output_file.write(str(iter) + ',' + str(accuracy_) + '\n')
                 plt.scatter(pd.to_datetime(days), test_y.reshape(-1, ), c="darkorange", s=20, edgecolor="black",
                             label="data")
@@ -560,7 +549,6 @@ if __name__ == '__main__':
     # rice [2,3,5,6,7,9,11,13,14,17,18,19,21,22,23,24,29,30,32,34,35]
     barns = [2, 3, 5, 6, 7, 9, 11, 13, 14, 17, 18, 19, 21, 22, 23, 24, 29, 30, 32, 34, 35]
 
-    barn = 9
     # 参数 输出文件 预测天数
 
     for day in range(15, 16):
@@ -570,11 +558,11 @@ if __name__ == '__main__':
                     for x in range(0, 6):
                         if y == x:
                             with tf.Graph().as_default() as g:
-                                ac_dir = '../DL_data/accuracy/1024_local_features_day{}/barn{}'.format(day,
+                                ac_dir = '../DL_data/dl_ac/1024_local_features_day{}/barn{}'.format(day,
                                                                                                                  barn)
                                 if not os.path.exists(ac_dir):
                                     os.makedirs(ac_dir)
-                                ac_file = '../DL_data/accuracy/1024_local_features_day{}/barn{}/z{}y{}x{}.ac'.format(
+                                ac_file = '../DL_data/dl_ac/1024_local_features_day{}/barn{}/z{}y{}x{}.ac'.format(
                                     day, barn, z, y, x)
                                 if os.path.exists(ac_file):
                                     continue

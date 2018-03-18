@@ -447,7 +447,7 @@ class GrainNetwork(object):
             v = tf.add(tf.div(tf.multiply(w, tf.reduce_sum(tf.square(y_true - y_mean))), num),
                        v)
         accuracy = tf.subtract(1., tf.div(u, v))
-        tf.summary.scalar('accuracy', accuracy)
+        tf.summary.scalar('dl_ac', accuracy)
         return accuracy
 
     def optimizer(self, loss, lr=0.01):
@@ -534,7 +534,7 @@ class GrainNetwork(object):
                 rs, pred_, loss_, accuracy_ = sess.run([merged, pred, loss, accuracy], feed_dict)
                 writer.add_summary(rs, iter)
 
-                print('loss', loss_, 'accuracy', accuracy_)
+                print('loss', loss_, 'dl_ac', accuracy_)
                 self.output_file.write(str(iter) + ',' + str(accuracy_) + '\n')
                 plt.plot(pd.to_datetime(days), test_y.reshape(-1, ), "darkorange", label="data")
                 # plt.plot(days, test_y.reshape(-1, ), 'r-')
@@ -559,7 +559,7 @@ if __name__ == '__main__':
     for day in range(1, 16):
         for barn in barns:
                 with tf.Graph().as_default() as g:
-                    ac_file = '../DL_data/accuracy/day{}_barn{}.ac'.format(day, barn)
+                    ac_file = '../DL_data/dl_ac/day{}_barn{}.ac'.format(day, barn)
                     net = GrainNetwork(ac_file, day)
                     net.train(600, barns, 9, 'rice', [0, 1, 1])
                     # net.paint()

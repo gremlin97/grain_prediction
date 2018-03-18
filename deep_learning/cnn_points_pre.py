@@ -449,8 +449,8 @@ class GrainNetwork(object):
             v = tf.add(tf.div(tf.multiply(w, tf.reduce_sum(tf.square(y_true - y_mean))), num),
                        v)
         accuracy = tf.subtract(1., tf.div(u, v))
-        tf.summary.scalar('accuracy', accuracy)
-        return accuracy, tf.is_nan(u)
+        tf.summary.scalar('dl_ac', accuracy)
+        return accuracy
 
     def optimizer(self, loss, lr=0.01):
         train_optimizer = tf.train.AdadeltaOptimizer(lr).minimize(loss)
@@ -469,7 +469,7 @@ class GrainNetwork(object):
         pred = self.add_layers()
         loss = self.loss(pred)
         optimizer = self.optimizer(loss, lr=0.01)
-        accuracy, v = self.accuracy(pred, grain_type)
+        accuracy = self.accuracy(pred, grain_type)
 
         sess = tf.Session()
         merged = tf.summary.merge_all()
@@ -480,7 +480,6 @@ class GrainNetwork(object):
         batch_manager = BatchManager(train_barns, test_barn, grain_type, '2015-09-01', '2017-9-20', self.pre_days,
                                      pre_point)
         pre_barn = None
-        final_s_ = None
         for iter in range(max_iter):
             cur_barn, images, features, lables, days, months = batch_manager.next_train_batch(1000)
 
@@ -534,10 +533,10 @@ class GrainNetwork(object):
                              self.temperatures: test_f,
                              self.keep_prob1: 1, self.keep_prob2: 1,
                              self.batch_tensor: test_imgs.shape[0] / self.STEP_SIZE}
-                rs, pred_, loss_, accuracy_, v_ = sess.run([merged, pred, loss, accuracy, v], feed_dict)
+                rs, pred_, loss_, accuracy_ = sess.run([merged, pred, loss, accuracy], feed_dict)
                 writer.add_summary(rs, iter)
 
-                print('loss', loss_, 'accuracy', accuracy_, v_)
+                print('loss', loss_, 'dl_ac', accuracy_)
                 self.output_file.write(str(iter) + ',' + str(accuracy_) + '\n')
                 # plt.scatter(pd.to_datetime(days), test_y.reshape(-1, ), c="darkorange", s=20, edgecolor="black",
                 #             label="data")
@@ -571,10 +570,10 @@ if __name__ == '__main__':
                     for x in range(0, 6):
                         with tf.Graph().as_default() as g:
                             if y == x:
-                                ac_dir = '../DL_data/accuracy/1024_full_features_day{}/barn{}'.format(day,barn)
+                                ac_dir = '../DL_data/dl_ac/1024_full_features_day{}/barn{}'.format(day,barn)
                                 if not os.path.exists(ac_dir):
                                     os.makedirs(ac_dir)
-                                ac_file = '../DL_data/accuracy/1024_full_features_day{}/barn{}/z{}y{}x{}.ac'.format(day, barn, z, y, x)
+                                ac_file = '../DL_data/dl_ac/1024_full_features_day{}/barn{}/z{}y{}x{}.ac'.format(day, barn, z, y, x)
                                 net = GrainNetwork(ac_file, day)
                                 # 参数 迭代次数 总仓 预测仓 预测粮食种类 [0-3, 0-5, 0-5] 层、行、列
                                 net.train(1200, barns, barn, 'rice', [z, y, x])

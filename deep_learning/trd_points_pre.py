@@ -1,0 +1,407 @@
+# -*- coding: utf-8 -*-
+import os
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+
+from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.linear_model import LinearRegression
+
+
+class BatchManager(object):
+    def __init__(self, train_barns, test_barn, grain_type, dt_from, dt_to, pre_days, pre_point):
+        train_barns = train_barns[:]
+        # train_barns.remove(test_barn)
+        self.train_barns = train_barns
+        self.test_barn = test_barn
+        # 天气和层温数据
+        self.air_temp = pd.read_csv('../DL_data/temperature/JiangSu.csv')
+        self.air_temp = self.air_temp[self.air_temp['city'] == '淮安']
+        if grain_type == 'rice':
+            self.layer_temp = pd.read_csv('../DL_data/layers_temperature/rice_layer_1.csv')
+        elif grain_type == 'wheat':
+            self.layer_temp = pd.read_csv('../DL_data/layers_temperature/wheat_layer_1.csv')
+        self.layer_temp = self.layer_temp[self.layer_temp['平均温度'] < 45]
+        # 粮仓温度点时间数据
+        self.train_barns_dt = {}
+        self.test_barn_dt = []
+        for barn in self.train_barns:
+            barn_layer_time = set(self.layer_temp[self.layer_temp['仓库信息'] == str(barn) + '仓']['粮情时间'])
+            self.train_barns_dt[barn] = []
+            barn_path = '../DL_data/points_temperature/' + str(barn) + '仓/'
+            barn_dir = os.listdir(barn_path)
+            for file_name in barn_dir:
+                dt = file_name.split('.')[0]
+                if dt in barn_layer_time:
+                    self.train_barns_dt[barn].append(dt)
+            self.train_barns_dt[barn] = pd.Series(self.train_barns_dt[barn])
+            self.train_barns_dt[barn] = self.train_barns_dt[barn][self.train_barns_dt[barn] >= dt_from]
+            self.train_barns_dt[barn] = self.train_barns_dt[barn][self.train_barns_dt[barn] <= dt_to]
+            self.train_barns_dt[barn].sort_values(inplace=True, ascending=True)
+
+        barn_path = '../DL_data/points_temperature/' + str(test_barn) + '仓/'
+        barn_dir = os.listdir(barn_path)
+        for file_name in barn_dir:
+            dt = file_name.split('.')[0]
+            self.test_barn_dt.append(dt)
+        self.test_barn_dt = pd.Series(self.test_barn_dt)
+        self.test_barn_dt = self.test_barn_dt[self.test_barn_dt >= dt_from]
+        self.test_barn_dt = self.test_barn_dt[self.test_barn_dt <= dt_to]
+        self.test_barn_dt.sort_values(inplace=True, ascending=True)
+
+        self.train_barn_index = 0
+        self.train_dt_index = 0
+        self.test_dt_index = 0
+        self.STEP_SIZE = 5
+        # cur_barn, images, features, lables = self.whole_train()
+        # self.X_scaler = pp.RobustScaler().fit(np.array(images).reshape((-1, 6 * 6 * 4)))
+        # self.F_scaler = pp.RobustScaler().fit(features)
+        self.data_cache = {}
+        self.pre_days = pre_days
+        self.pre_point = pre_point
+        # 月份One-hot编码器
+        from sklearn.preprocessing import OneHotEncoder
+        self.month_encoder = OneHotEncoder(n_values=12, dtype=np.float32, handle_unknown='error')
+        self.month_encoder.fit(np.arange(12).reshape((-1, 1)))
+
+    def truncation(self, *batches):
+        result = []
+        for batch in batches:
+            batch = np.array(batch)
+            size = batch.shape[0]
+            # re_size = int(size / self.STEP_SIZE) * self.STEP_SIZE
+            # result.append(batch[0:re_size])
+            if size < 20:
+                result.append([])
+            else:
+                result.append(batch)
+        return result
+
+    def whole_train(self):
+        points_batch = []  # 粮食温度点
+        other_features_batch = []  # 其他特征
+        output_batch = []  # 输出
+        barns = self.train_barns
+        for _ in barns:
+            _, pb, fb, ob, days = self.next_train_batch(1000)
+            points_batch = points_batch + pb
+            other_features_batch = other_features_batch + fb
+            output_batch = output_batch + ob
+        return 'whole', points_batch, other_features_batch, output_batch
+
+    def next_train_batch(self, batch_size):
+        barn_now = self.train_barns[self.train_barn_index]
+        if barn_now in self.data_cache:
+            self.train_barn_index = (self.train_barn_index + 1) % len(self.train_barns)
+            return self.data_cache[barn_now]
+        points_batch = []  # 粮食温度点
+        other_features_batch = []  # 其他特征
+        output_batch = []  # 输出
+        size = 0
+        days = []
+        months = []
+        step_count = 1
+        while size < batch_size:
+            flag = False
+            pt, of, pre, pre_day, month = None, None, None, None, None
+            while not flag:
+                flag, pt, of, pre, pre_day, month = self.next(barn_now, self.train_dt_index)
+                self.train_dt_index += 1
+                if self.train_dt_index == len(self.train_barns_dt[barn_now]):
+                    self.train_barn_index = (self.train_barn_index + 1) % len(self.train_barns)
+                    # self.train_dt_index = random.randint(0, 4)
+                    self.train_dt_index = 0
+
+                    # points_batch, other_features_batch = self.truncation(points_batch,
+                    #                                                      other_features_batch
+                    #                                                      )
+                    if len(points_batch) == 0:
+                        return self.next_train_batch(batch_size)
+                    self.data_cache[barn_now] = (
+                        barn_now, points_batch, other_features_batch, output_batch, days, months)
+                    # return barn_now, points_batch, other_features_batch, output_batch, days
+                    return self.data_cache[barn_now]
+            points_batch.append(pt)
+            other_features_batch.append(of)
+            # if step_count % self.STEP_SIZE == 0:
+            output_batch.append(pre)
+            days.append(pre_day)
+            months.append(month)
+            step_count += 1
+            size += 1
+        # points_batch, other_features_batch = self.truncation(points_batch,
+        #                                                      other_features_batch)
+        if len(points_batch) == 0:
+            return self.next_train_batch(batch_size)
+        self.data_cache[barn_now] = (barn_now, points_batch, other_features_batch, output_batch, days, months)
+        # return barn_now, points_batch, other_features_batch, output_batch, days
+        return self.data_cache[barn_now]
+
+    def next_test_batch(self, batch_size):
+        if self.test_barn in self.data_cache:
+            return self.data_cache[self.test_barn]
+        points_batch = []  # 粮食温度点
+        other_features_batch = []  # 其他特征
+        output_batch = []  # 输出
+        size = 0
+        days = []
+        months = []
+        step_count = 1
+        while size < batch_size:
+            flag = False
+            pt, of, pre, pre_day, month = None, None, None, None, None
+            while not flag:
+                flag, pt, of, pre, pre_day, month = self.next(self.test_barn, self.test_dt_index)
+                self.test_dt_index += 1
+                if self.test_dt_index == len(self.test_barn_dt):
+                    self.test_dt_index = 0
+                    # points_batch, other_features_batch = self.truncation(points_batch,
+                    #                                                            other_features_batch)
+                    if len(points_batch) == 0:
+                        return self.next_test_batch(batch_size)
+                    self.data_cache[self.test_barn] = points_batch, other_features_batch, output_batch, days, months
+                    # return points_batch, other_features_batch, output_batch, days
+                    return self.data_cache[self.test_barn]
+            points_batch.append(pt)
+            other_features_batch.append(of)
+            # if step_count % self.STEP_SIZE == 0:
+            output_batch.append(pre)
+            days.append(pre_day)
+            months.append(month)
+            step_count += 1
+            size += 1
+        # print(output_batch)
+        # points_batch, other_features_batch = self.truncation(points_batch,
+        #                                                            other_features_batch)
+        if len(points_batch) == 0:
+            return self.next_test_batch(batch_size)
+        self.data_cache[self.test_barn] = points_batch, other_features_batch, output_batch, days, months
+        # return points_batch, other_features_batch, output_batch, days
+        return self.data_cache[self.test_barn]
+
+    def next(self, barn, dt_index):
+        if barn in self.train_barns:
+            dts = self.train_barns_dt[barn]  # 该仓的时间
+        else:
+            dts = self.test_barn_dt
+        layer_temp = self.layer_temp[self.layer_temp['仓库信息'] == str(barn) + '仓']
+        dt = dts.iloc[dt_index]  # 当前时间
+        delta = pd.to_timedelta(str(self.pre_days) + ' days')
+        pre_dt = (pd.to_datetime(dt) + delta).strftime('%Y-%m-%d')  # 十天后
+        air_df = self.air_temp[[dt < date <= pre_dt for date in self.air_temp['date']]]
+        path = '../DL_data/points_temperature/' + str(barn) + '仓/'
+        dt_path = path + dt + '.npy'
+        # 如果当前温度和预测温度存在，且之间的天气温度存在足够
+        other_features = []
+        if os.path.exists(dt_path) \
+                and pre_dt in set(layer_temp['粮情时间']) \
+                and air_df.shape[0] >= self.pre_days * .6 \
+                and dt in set(self.air_temp['date']):
+
+            air_now = self.air_temp[self.air_temp['date'] == dt]['average'].iloc[0]
+            if air_df.shape[0] != self.pre_days:
+                air_df = self.fill_data(air_df, pre_dt)
+            points_temp = np.load(dt_path)
+            # print(points_temp.shape, dt, barn)
+            pre_path = path + pre_dt + '.npy'
+            pre_temp = np.load(pre_path)
+            # pre_temp = layer_temp[layer_temp['粮情时间'] == pre_dt]['平均温度'].iloc[0]
+
+            # 十一天气温加时间（1-365）
+            other_features.append(air_now)
+
+            other_features.extend(air_df['average'])
+            day_in_year = int(pd.to_datetime(pre_dt).strftime('%j'))
+            # month 0-11
+            month = int(pd.to_datetime(pre_dt).strftime('%m')) - 1
+            # # day_in_year
+            # other_features.append(day_in_year / 365 - 0.5)
+            # one-hot 月份信息
+            other_features.extend(self.month_encoder.transform([[month]]).toarray().reshape(-1, ))
+            return True, np.array(points_temp), np.array(other_features), pre_temp, pre_dt, month
+        else:
+            return False, None, None, None, None, None
+
+    def fill_data(self, df, pre_dt):
+        mean = df['average'].mean()
+        dts = pd.date_range(end=pre_dt, periods=self.pre_days)
+        for dt in dts:
+            if dt.strftime('%Y-%m-%d') not in set(df['date']):
+                df_temp = pd.DataFrame({'date': [dt.strftime('%Y-%m-%d')], 'average': [mean]})
+                # df = df.append({'date': dt.strftime('%Y-%m-%d'), 'average': mean}, ignore_index=True)
+                df = pd.concat([df, df_temp])
+                df = df.sort_values(by=['date'])
+        return df
+
+
+class Estimator(object):
+    def __init__(self, output, pre_days):
+
+        self.month_map = [3, 0, 0, 0, 0, 1, 1, 1, 2, 2, 2, 3]
+        self.wheat_weights = [0.0402227666955,
+                              0.031469607781,
+                              0.0441908958449,
+                              0.0619128091163,
+                              0.0779277661702,
+                              0.0949637405299,
+                              0.117478400516,
+                              0.133751192474,
+                              0.130655772891,
+                              0.111494953891,
+                              0.0928757160844,
+                              0.0630563780055, ]
+        self.rice_weights = [0.032534470896,
+                             0.0245423446013,
+                             0.035091664762,
+                             0.0551522064438,
+                             0.0759471321252,
+                             0.0966625524964,
+                             0.1271142898,
+                             0.145481189775,
+                             0.144061524447,
+                             0.120033676453,
+                             0.0919763712315,
+                             0.0514025769694,
+                             ]
+        for m in range(12):
+            if self.month_map[m] == 1 or self.month_map[m] == 2:
+                self.wheat_weights[m] *= 2
+                self.rice_weights[m] *= 2
+        self.output_file = open(output, 'a+')
+        self.pre_days = pre_days
+
+    def accuracy(self, preds, months, labels, grain_type='rice'):
+        u, v = 0, 0
+        y_mean = np.mean(preds)
+        for m in range(0, 12):
+            y_true = labels[months == m]
+            y_pre = preds[months == m]
+            num = len(y_true)
+            if grain_type == 'rice':
+                w = self.rice_weights[m]
+            else:
+                w = self.wheat_weights[m]
+            if num:
+                u += (w * np.sum((y_true - y_pre) ** 2)) / num
+                v += (w * np.sum((y_true - y_mean) ** 2)) / num
+        accuracy = 1 - u / v
+        return accuracy
+
+    def train(self, train_barns, test_barn, grain_type, pre_point, clf, data):
+
+        plt.figure(1, figsize=(15, 5))
+        plt.ion()
+        batch_manager = BatchManager(train_barns, test_barn, grain_type, '2015-09-01', '2017-9-20', self.pre_days,
+                                     pre_point)
+        IMGs = []
+        FEAs = []
+        LABLEs = []
+        barns = []
+        MONTHs = []
+        if data is None:
+            if grain_type == 'rice':
+                barns = [2, 3, 5, 6, 7, 9, 11, 13, 14, 17, 18, 19, 21, 22, 23, 24, 29, 30, 32, 34, 35]
+            elif grain_type == 'wheat':
+                barns = [1, 8, 10, 12, 15, 16, 20, 26, 27, 28, 31, 33]
+            barns.remove(test_barn)
+            for barn in barns:
+                cur_barn, images, features, lables, days, months = batch_manager.next_train_batch(1000)
+                IMGs.extend(images)
+                FEAs.extend(features)
+                LABLEs.extend(lables)
+                MONTHs.extend(months)
+                print('load data of {} barn...'.format(barn))
+            IMGs, FEAs, LABLEs, MONTHs = tuple(map(lambda x: np.array(x), [IMGs, FEAs, LABLEs, MONTHs]))
+        else:
+            IMGs, FEAs, LABLEs, MONTHs = data
+        Y = LABLEs[:, pre_point[0], pre_point[1], pre_point[2]]
+        # 使用一个点
+        X = IMGs[:, pre_point[0], pre_point[1], [pre_point[2]]]
+        X = X.reshape(IMGs.shape[0], -1)
+            # WEIGHTs = list(map(lambda m: self.rice_weights[m], MONTHs))
+            # IMGs = np.sort(IMGs)
+        X = np.concatenate([X, FEAs], axis=1)
+        # 量纲化数据
+        import sklearn.preprocessing as pp
+        scaler = pp.StandardScaler().fit(X)
+
+        clf.fit(X, Y)
+        # 测试结果
+        test_imgs, test_f, test_y, days, months = tuple(map(lambda x: np.array(x), batch_manager.next_test_batch(1000)))
+        test_y = test_y[:, pre_point[0], pre_point[1], pre_point[2]]
+        test_imgs = test_imgs[:, pre_point[0], pre_point[1], [pre_point[2]]]
+        test_imgs = test_imgs.reshape(test_imgs.shape[0], -1)
+        # test_imgs = np.sort(test_imgs)
+        test_X = np.concatenate([test_imgs, test_f], axis=1)
+        preds = clf.predict(test_X)
+        print preds
+
+        acc = self.accuracy(preds, months, test_y)
+        print(acc)
+
+        self.output_file.write('z{}y{}x{},'.format(*pre_point)+str(acc)+'\n')
+        # print(lables, features)
+        plt.figure(1, figsize=(15, 5))
+        plt.ion()
+        plt.plot(pd.to_datetime(days), test_y.reshape(-1, ), 'r-')
+
+        plt.plot(pd.to_datetime(days), preds.reshape(-1, ), 'b-', label='prediction')
+        plt.legend()
+        plt.draw()
+        plt.pause(0.05)
+        plt.clf()
+        return IMGs, FEAs, LABLEs, MONTHs
+
+
+
+if __name__ == '__main__':
+    # wheat [1,8,10,12,15,16,20,26,27,28,31,33]
+    # rice [2,3,5,6,7,9,11,13,14,17,18,19,21,22,23,24,29,30,32,34,35]
+    barns = [2, 3, 5, 6, 7, 9, 11, 13, 14, 17, 18, 19, 21, 22, 23, 24, 29, 30, 32, 34, 35]
+
+    barn = 9
+    # 参数 输出文件 预测天数
+
+    from sklearn.svm import SVR
+    import xgboost as xgb
+    for day in range(15, 16):
+        for barn in barns[:5]:
+            data = None
+            for z in range(0, 4):
+                for y in range(0, 6):
+                    for x in range(0, 6):
+                        if y == x:
+                            ac_dir = '../DL_data/tr_ac/XGB_day{}'.format(day)
+                            if not os.path.exists(ac_dir):
+                                os.makedirs(ac_dir)
+                            ac_file = '../DL_data/tr_ac/XGB_day{}/barn{}.ac'.format(day,
+                                                                                                      barn,
+                                                                                                      )
+
+                            xlf = xgb.XGBRegressor(max_depth=10,
+                                                   learning_rate=0.1,
+                                                   n_estimators=100,
+                                                   silent=True,
+                                                   objective='reg:linear',
+                                                   nthread=-1,
+                                                   gamma=0,
+                                                   min_child_weight=1,
+                                                   max_delta_step=0,
+                                                   subsample=0.85,
+                                                   colsample_bytree=0.7,
+                                                   colsample_bylevel=1,
+                                                   reg_alpha=0,
+                                                   reg_lambda=1,
+                                                   scale_pos_weight=1,
+                                                   seed=1440,
+                                                   missing=None)
+                            # clf = SVR(C=1.0, epsilon=0.2)
+                            # clf = GradientBoostingRegressor(n_estimators=500, learning_rate=0.1,
+                            #                                 max_depth=4, random_state=0, loss='lad')
+                            # clf = LinearRegression()
+                            est = Estimator(ac_file, day)
+                            # 参数 迭代次数 总仓 预测仓 预测粮食种类 [0-3, 0-5, 0-5] 层、行、列
+                            tr_barns = barns[:]
+                            tr_barns.remove(barn)
+                            data = est.train(tr_barns, barn, 'rice', [z, y, x], xlf, data)

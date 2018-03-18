@@ -241,14 +241,9 @@ class GrainNetwork(object):
         with tf.variable_scope("weights"):
             # 权重
             self.weights = {
-                # 6*6*4->6*6*20
-                'conv1': tf.get_variable('W_conv1', [2, 2, 4, 20],
-                                         initializer=tf.contrib.layers.xavier_initializer_conv2d()),
-                # 6*6*20->6*6*40->3*3*40
-                'conv2': tf.get_variable('W_conv2', [2, 2, 20, 40],
-                                         initializer=tf.contrib.layers.xavier_initializer_conv2d()),
+
                 # 3*3*40+predays+1+12->1024
-                'fc1': tf.get_variable('W_fc1', [3 * 3 * 40 + pre_days + 13, 1024],
+                'fc1': tf.get_variable('W_fc1', [6 * 6 * 4 + pre_days + 13, 512],
                                         initializer=tf.contrib.layers.xavier_initializer()),
                 # 1024->512
                 # 512->64
@@ -258,19 +253,16 @@ class GrainNetwork(object):
                 'fc3': tf.get_variable('W_fc3', [512, 256],
                                       initializer=tf.contrib.layers.xavier_initializer()),
                 # 64->1
-                'output': tf.get_variable('W_output', [256, 1],
+                'output': tf.get_variable('W_output', [512, 1],
                                           initializer=tf.contrib.layers.xavier_initializer()),
             }
 
             # 偏置
             self.biases = {
-                'conv1': tf.get_variable('b_conv1', [20, ],
-                                         initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
-                'conv2': tf.get_variable('b_conv2', [40, ],
-                                         initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
-                'fc1': tf.get_variable('b_fc1', [1024, ],
+
+                'fc1': tf.get_variable('b_fc1', [512, ],
                                        initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
-                'fc1_t': tf.get_variable('bt_fc1', [12, 1024],
+                'fc1_t': tf.get_variable('bt_fc1', [12, 512],
                                          initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
                 'fc2': tf.get_variable('b_fc2', [512, ],
                                        initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
@@ -333,77 +325,45 @@ class GrainNetwork(object):
         self.pre_days = pre_days
 
     def add_layers(self):
-        # 第一卷积层
-        with tf.name_scope('conv1'):
-            with tf.name_scope('conv'):
-                conv1 = tf.nn.bias_add(
-                    tf.nn.conv2d(self.images, self.weights['conv1'], strides=[1, 1, 1, 1], padding='SAME'),
-                    self.biases['conv1']
-                )
-            with tf.name_scope('relu'):
-                conv1 = tf.nn.relu(conv1)
 
-
-        # # 第一平均池化层
-        # with tf.name_scope('pool1'):
-        #     pool1 = tf.nn.avg_pool(conv1, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding='SAME')
-
-
-
-        # 第二卷积层
-        with tf.name_scope('conv2'):
-            with tf.name_scope('conv'):
-                conv2 = tf.nn.bias_add(
-                    tf.nn.conv2d(conv1, self.weights['conv2'], strides=[1, 1, 1, 1], padding='SAME'),
-                    self.biases['conv2']
-                )
-            with tf.name_scope('relu'):
-                conv2 = tf.nn.relu(conv2)
-        # 第二平均池化层
-        with tf.name_scope('pool2'):
-            pool2 = tf.nn.avg_pool(conv2, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding='VALID')
-            # pool2 = tf.nn.dropout(pool2, self.keep_prob1)
         # 第一全连接层
         with tf.name_scope('fc1'):
             with tf.name_scope('fc1'):
-
-                flatten = tf.reshape(pool2, [-1, 3 * 3 * 40], name='flatten')
+                flatten = tf.reshape(self.images, [-1, 6 * 6 * 4], name='flatten')
                 connectted = tf.concat([self.temperatures, flatten], axis=1, name='concat')
                 fc1 = tf.matmul(connectted, self.weights['fc1']) + self.biases['fc1']
-                month_to_bias = tf.gather(self.month_map, tf.reshape(self.months, [-1, ]))
-                fc1 = fc1 + tf.gather(self.biases['fc1_t'], month_to_bias)
             with tf.name_scope('drop1'):
                 # 第一dropout层
                 drop1 = tf.nn.dropout(fc1, self.keep_prob1)
                 drop1 = tf.nn.relu(drop1)
 
-        #第二全连接层
-        with tf.name_scope('fc2'):
-            with tf.name_scope('fc2'):
-                fc2 = tf.matmul(drop1, self.weights['fc2']) + self.biases['fc2']
-                month_to_bias = tf.gather(self.month_map, tf.reshape(self.months, [-1, ]))
-                fc2 = fc2 + tf.gather(self.biases['fc2_t'], month_to_bias)
-
-            with tf.name_scope('drop2'):
-                # 第一dropout层
-                drop2 = tf.nn.dropout(fc2, self.keep_prob2)
-                drop2 = tf.nn.relu(drop2)
-
-        #第三全连接层
-        with tf.name_scope('fc3'):
-           with tf.name_scope('fc3'):
-               fc3 = tf.matmul(drop2, self.weights['fc3']) + self.biases['fc3']
-               month_to_bias = tf.gather(self.month_map, tf.reshape(self.months, [-1, ]))
-               fc3 = fc3 + tf.gather(self.biases['fc3_t'], month_to_bias)
-               # print(tf.gather(self.biases['fc3_t'], tf.reshape(self.months, [-1, ])).shape)
-           with tf.name_scope('drop2'):
-               #     # 第一dropout层
-               drop3 = tf.nn.dropout(fc3, self.keep_prob2)
-               drop3 = tf.nn.relu(drop3)
+        # #第二全连接层
+        # with tf.name_scope('fc2'):
+        #     with tf.name_scope('fc2'):
+        #         fc2 = tf.matmul(drop1, self.weights['fc2']) + self.biases['fc2']
+        #         month_to_bias = tf.gather(self.month_map, tf.reshape(self.months, [-1, ]))
+        #         fc2 = fc2 + tf.gather(self.biases['fc2_t'], month_to_bias)
+        #
+        #     with tf.name_scope('drop2'):
+        #         # 第一dropout层
+        #         drop2 = tf.nn.dropout(fc2, self.keep_prob2)
+        #         drop2 = tf.nn.relu(drop2)
+        #
+        # #第三全连接层
+        # with tf.name_scope('fc3'):
+        #    with tf.name_scope('fc3'):
+        #        fc3 = tf.matmul(drop2, self.weights['fc3']) + self.biases['fc3']
+        #        month_to_bias = tf.gather(self.month_map, tf.reshape(self.months, [-1, ]))
+        #        fc3 = fc3 + tf.gather(self.biases['fc3_t'], month_to_bias)
+        #        # print(tf.gather(self.biases['fc3_t'], tf.reshape(self.months, [-1, ])).shape)
+        #    with tf.name_scope('drop2'):
+        #        #     # 第一dropout层
+        #        drop3 = tf.nn.dropout(fc3, self.keep_prob2)
+        #        drop3 = tf.nn.relu(drop3)
 
         # 输出层
         with tf.name_scope('output'):
-            output = tf.matmul(drop3, self.weights['output']) + self.biases['output']
+            output = tf.matmul(drop1, self.weights['output']) + self.biases['output']
             month_to_bias = tf.gather(self.month_map, tf.reshape(self.months, [-1, ]))
             output = output + tf.gather(self.biases['output_t'], month_to_bias)
         return output
@@ -538,15 +498,15 @@ class GrainNetwork(object):
 
                 print('loss', loss_, 'dl_ac', accuracy_)
                 self.output_file.write(str(iter) + ',' + str(accuracy_) + '\n')
-                # plt.scatter(pd.to_datetime(days), test_y.reshape(-1, ), c="darkorange", s=20, edgecolor="black",
-                #             label="data")
+                plt.scatter(pd.to_datetime(days), test_y.reshape(-1, ), c="darkorange", s=20, edgecolor="black",
+                            label="data")
                 # plt.plot(pd.to_datetime(days), test_y.reshape(-1, ), "darkorange", label="data")
                 # plt.plot(days, test_y.reshape(-1, ), 'r-')
-                # plt.plot(pd.to_datetime(days), pred_.reshape(-1, ), 'b-', label='prediction')
-                # plt.legend()
+                plt.plot(pd.to_datetime(days), pred_.reshape(-1, ), 'b-', label='prediction')
+                plt.legend()
                 # plt.ylim((-1.2, 1.2))
-                # plt.draw()
-                # plt.pause(0.001)
+                plt.draw()
+                plt.pause(0.001)
                 # plt.savefig('../figures/rice_barn9_point.png')
                 plt.clf()
 
@@ -564,16 +524,16 @@ if __name__ == '__main__':
     # 参数 输出文件 预测天数
 
     for day in range(15, 16):
-        for barn in barns[13:14]:
+        for barn in barns[15:]:
             for z in range(0, 4):
                 for y in range(0, 6):
                     for x in range(0, 6):
                         with tf.Graph().as_default() as g:
                             if y == x:
-                                ac_dir = '../DL_data/dl_ac/1024_full_features_day{}/barn{}'.format(day,barn)
+                                ac_dir = '../DL_data/dl_ac/MLP_day{}/barn{}'.format(day,barn)
                                 if not os.path.exists(ac_dir):
                                     os.makedirs(ac_dir)
-                                ac_file = '../DL_data/dl_ac/1024_full_features_day{}/barn{}/z{}y{}x{}.ac'.format(day, barn, z, y, x)
+                                ac_file = '../DL_data/dl_ac/MLP_day{}/barn{}/z{}y{}x{}.ac'.format(day, barn, z, y, x)
                                 net = GrainNetwork(ac_file, day)
                                 # 参数 迭代次数 总仓 预测仓 预测粮食种类 [0-3, 0-5, 0-5] 层、行、列
                                 net.train(1200, barns, barn, 'rice', [z, y, x])
