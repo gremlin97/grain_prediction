@@ -5,6 +5,7 @@ for dir_m in os.listdir('./'):
     if os.path.isfile(dir_m):
         continue
     writer = open(dir_m + '.csv', 'w')
+    whole = []
     for dir_b in os.listdir(dir_m):
         ac_list = []
         for file in os.listdir(os.path.join(dir_m, dir_b)):
@@ -15,7 +16,9 @@ for dir_m in os.listdir('./'):
                     ac = float(line.strip().split(',')[1])
                     mac = ac if ac > mac else mac
                 ac_list.append(mac)
+                whole.append(mac)
         mean_ac = np.mean(ac_list)
         writer.write(dir_b + ',' + str(mean_ac) + '\n')
+    writer.write('var,'+str(np.nanvar(whole)))
     writer.close()
 
