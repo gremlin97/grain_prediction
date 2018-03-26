@@ -247,13 +247,13 @@ class GrainNetwork(object):
                                         initializer=tf.contrib.layers.xavier_initializer()),
                 # 1024->512
                 # 512->64
-                'fc2': tf.get_variable('W_fc2', [1024, 512],
+                'fc2': tf.get_variable('W_fc2', [512, 256],
                                        initializer=tf.contrib.layers.xavier_initializer()),
                 # 256->64
                 'fc3': tf.get_variable('W_fc3', [512, 256],
                                       initializer=tf.contrib.layers.xavier_initializer()),
                 # 64->1
-                'output': tf.get_variable('W_output', [512, 1],
+                'output': tf.get_variable('W_output', [256, 1],
                                           initializer=tf.contrib.layers.xavier_initializer()),
             }
 
@@ -264,9 +264,9 @@ class GrainNetwork(object):
                                        initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
                 'fc1_t': tf.get_variable('bt_fc1', [12, 512],
                                          initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
-                'fc2': tf.get_variable('b_fc2', [512, ],
+                'fc2': tf.get_variable('b_fc2', [256, ],
                                        initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
-                'fc2_t': tf.get_variable('bt_fc2', [12, 512],
+                'fc2_t': tf.get_variable('bt_fc2', [12, 256],
                                          initializer=tf.constant_initializer(value=0.0, dtype=tf.float32)),
 
                 'fc3': tf.get_variable('b_fc3', [256, ],
@@ -335,20 +335,20 @@ class GrainNetwork(object):
             with tf.name_scope('drop1'):
                 # 第一dropout层
                 drop1 = tf.nn.dropout(fc1, self.keep_prob1)
-                drop1 = tf.nn.relu(drop1)
+                drop1 = tf.nn.elu(drop1)
 
-        # #第二全连接层
-        # with tf.name_scope('fc2'):
-        #     with tf.name_scope('fc2'):
-        #         fc2 = tf.matmul(drop1, self.weights['fc2']) + self.biases['fc2']
-        #         month_to_bias = tf.gather(self.month_map, tf.reshape(self.months, [-1, ]))
-        #         fc2 = fc2 + tf.gather(self.biases['fc2_t'], month_to_bias)
-        #
-        #     with tf.name_scope('drop2'):
-        #         # 第一dropout层
-        #         drop2 = tf.nn.dropout(fc2, self.keep_prob2)
-        #         drop2 = tf.nn.relu(drop2)
-        #
+        #第二全连接层
+        with tf.name_scope('fc2'):
+            with tf.name_scope('fc2'):
+                fc2 = tf.matmul(drop1, self.weights['fc2']) + self.biases['fc2']
+                month_to_bias = tf.gather(self.month_map, tf.reshape(self.months, [-1, ]))
+                fc2 = fc2 + tf.gather(self.biases['fc2_t'], month_to_bias)
+
+            with tf.name_scope('drop2'):
+                # 第一dropout层
+                drop2 = tf.nn.dropout(fc2, self.keep_prob2)
+                drop2 = tf.nn.elu(drop2)
+
         # #第三全连接层
         # with tf.name_scope('fc3'):
         #    with tf.name_scope('fc3'):
@@ -363,7 +363,7 @@ class GrainNetwork(object):
 
         # 输出层
         with tf.name_scope('output'):
-            output = tf.matmul(drop1, self.weights['output']) + self.biases['output']
+            output = tf.matmul(drop2, self.weights['output']) + self.biases['output']
             month_to_bias = tf.gather(self.month_map, tf.reshape(self.months, [-1, ]))
             output = output + tf.gather(self.biases['output_t'], month_to_bias)
         return output
@@ -530,10 +530,10 @@ if __name__ == '__main__':
                     for x in range(0, 6):
                         with tf.Graph().as_default() as g:
                             if y == x:
-                                ac_dir = '../DL_data/dl_ac/MLP_day{}/barn{}'.format(day,barn)
+                                ac_dir = '../DL_data/dl_ac/MLP_512_elu_day{}/barn{}'.format(day,barn)
                                 if not os.path.exists(ac_dir):
                                     os.makedirs(ac_dir)
-                                ac_file = '../DL_data/dl_ac/MLP_day{}/barn{}/z{}y{}x{}.ac'.format(day, barn, z, y, x)
+                                ac_file = '../DL_data/dl_ac/MLP_512_elu_day{}/barn{}/z{}y{}x{}.ac'.format(day, barn, z, y, x)
                                 net = GrainNetwork(ac_file, day)
                                 # 参数 迭代次数 总仓 预测仓 预测粮食种类 [0-3, 0-5, 0-5] 层、行、列
                                 net.train(1200, barns, barn, 'rice', [z, y, x])

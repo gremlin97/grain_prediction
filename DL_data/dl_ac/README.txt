@@ -8,3 +8,4 @@
 256_full_features_day15.csv 所有点，一层全连接，256
 256_local_features_day15.csv 局部点，一层全连接，256
 256_local_monthless_features_day15.csv 局部点，无月份信息，一层全连接，256
+MLP 全链接 一层 512
